@@ -5,15 +5,17 @@ use crate::resource_types::ResourceType;
 pub struct Recipe {
     pub name: String,
     pub description: String,
-    pub word: String,  // The word to type to craft this item
+    pub craft_sentence: String,  // A thematic sentence about crafting this item
     pub current_input: String,  // Current typing progress
     pub requirements: HashMap<ResourceType, u32>,
     pub unlocks: Vec<String>,  // Names of things this unlocks (other recipes, upgrades, etc.)
+    pub upgrade_count: u32,  // Track how many times this upgrade has been completed
 }
 
 pub struct CraftingManager {
     recipes: Vec<Recipe>,
     unlocked_recipes: Vec<bool>,  // Parallel vec to track what's unlocked
+    has_workbench: bool,  // Track if workbench has been crafted
 }
 
 impl CraftingManager {
@@ -21,22 +23,56 @@ impl CraftingManager {
         let mut manager = Self {
             recipes: Vec::new(),
             unlocked_recipes: Vec::new(),
+            has_workbench: false,
         };
 
         // Add initial recipe - Workbench
         let mut workbench_reqs = HashMap::new();
-        workbench_reqs.insert(ResourceType::Wood, 50);
-        workbench_reqs.insert(ResourceType::Copper, 20);
+        workbench_reqs.insert(ResourceType::Wood, 15);
+        workbench_reqs.insert(ResourceType::Copper, 10);
         
         manager.recipes.push(Recipe {
             name: "Workbench".to_string(),
             description: "A basic crafting station. Unlocks new recipes.".to_string(),
-            word: "construct_workbench".to_string(),  // Descriptive word about what you're crafting
+            craft_sentence: "I carefully assemble wooden planks and copper joints to build a sturdy workbench.".to_string(),
             current_input: String::new(),
             requirements: workbench_reqs,
-            unlocks: vec!["Advanced Tools".to_string()],  // Will unlock more recipes later
+            unlocks: vec!["Advanced Tools".to_string()],
+            upgrade_count: 0,
         });
         manager.unlocked_recipes.push(true);  // Workbench is initially available
+
+        // Add workbench-dependent recipes (initially locked)
+        
+        // Upgrade Axe
+        let mut axe_reqs = HashMap::new();
+        axe_reqs.insert(ResourceType::Wood, 20);
+        axe_reqs.insert(ResourceType::Copper, 15);
+        manager.recipes.push(Recipe {
+            name: "Upgrade Axe".to_string(),
+            description: "+1 Wood per harvest".to_string(),
+            craft_sentence: "I sharpen my axe blade and reinforce the handle for better wood harvesting.".to_string(),
+            current_input: String::new(),
+            requirements: axe_reqs,
+            unlocks: vec![],
+            upgrade_count: 0,
+        });
+        manager.unlocked_recipes.push(false);  // Locked until workbench is built
+
+        // Upgrade Pickaxe
+        let mut pickaxe_reqs = HashMap::new();
+        pickaxe_reqs.insert(ResourceType::Wood, 15);
+        pickaxe_reqs.insert(ResourceType::Copper, 20);
+        manager.recipes.push(Recipe {
+            name: "Upgrade Pickaxe".to_string(),
+            description: "+1 Copper per harvest".to_string(),
+            craft_sentence: "I forge a stronger pickaxe head and balance it for efficient mining.".to_string(),
+            current_input: String::new(),
+            requirements: pickaxe_reqs,
+            unlocks: vec![],
+            upgrade_count: 0,
+        });
+        manager.unlocked_recipes.push(false);  // Locked until workbench is built
 
         manager
     }
@@ -50,7 +86,11 @@ impl CraftingManager {
     }
 
     pub fn is_recipe_unlocked(&self, index: usize) -> bool {
-        self.unlocked_recipes.get(index).copied().unwrap_or(false)
+        if index == 0 {  // Workbench is special
+            true  // Always available
+        } else {
+            self.has_workbench && self.unlocked_recipes.get(index).copied().unwrap_or(false)
+        }
     }
 
     pub fn can_craft(&self, recipe_index: usize, wood: u32, copper: u32) -> bool {
@@ -83,9 +123,24 @@ impl CraftingManager {
     }
 
     pub fn craft_item(&mut self, recipe_index: usize) -> Option<(Recipe, HashMap<ResourceType, u32>)> {
-        if let Some(recipe) = self.recipes.get(recipe_index) {
-            // Check if the word is fully typed
-            if recipe.current_input == recipe.word {
+        if let Some(recipe) = self.recipes.get_mut(recipe_index) {
+            // Check if the sentence is fully typed
+            if recipe.current_input == recipe.craft_sentence {
+                // If this is the workbench, unlock workbench-dependent recipes
+                if recipe_index == 0 {
+                    self.has_workbench = true;
+                    // Unlock all workbench-dependent recipes
+                    for i in 1..self.unlocked_recipes.len() {
+                        self.unlocked_recipes[i] = true;
+                    }
+                } else {
+                    // For upgrades, increment the upgrade count
+                    recipe.upgrade_count += 1;
+                }
+                
+                // Clear the input after crafting
+                recipe.current_input.clear();
+                
                 // Return a clone of the recipe and its costs
                 return Some((recipe.clone(), recipe.requirements.clone()));
             }
@@ -95,11 +150,11 @@ impl CraftingManager {
 
     pub fn handle_input(&mut self, recipe_index: usize, c: char) -> bool {
         if let Some(recipe) = self.recipes.get_mut(recipe_index) {
-            let target_word = &recipe.word;
+            let target_sentence = &recipe.craft_sentence;
             let current_pos = recipe.current_input.len();
             
-            if current_pos < target_word.len() {
-                if target_word.chars().nth(current_pos) == Some(c) {
+            if current_pos < target_sentence.len() {
+                if target_sentence.chars().nth(current_pos) == Some(c) {
                     recipe.current_input.push(c);
                     true
                 } else {
@@ -118,5 +173,43 @@ impl CraftingManager {
         if let Some(recipe) = self.recipes.get_mut(recipe_index) {
             recipe.current_input.clear();
         }
+    }
+
+    // Get the current multiplier for a resource type
+    pub fn get_multiplier(&self, resource_type: &ResourceType) -> f32 {
+        match resource_type {
+            ResourceType::Wood => {
+                // Get upgrade count from Axe upgrades
+                if let Some(recipe) = self.recipes.iter().find(|r| r.name == "Upgrade Axe") {
+                    1.0 + recipe.upgrade_count as f32  // Base of 1 + 1 for each upgrade
+                } else {
+                    1.0
+                }
+            },
+            ResourceType::Copper => {
+                // Get upgrade count from Pickaxe upgrades
+                if let Some(recipe) = self.recipes.iter().find(|r| r.name == "Upgrade Pickaxe") {
+                    1.0 + recipe.upgrade_count as f32  // Base of 1 + 1 for each upgrade
+                } else {
+                    1.0
+                }
+            },
+        }
+    }
+
+    // Get the next cost for an upgrade recipe
+    pub fn get_next_upgrade_cost(&self, recipe_index: usize) -> HashMap<ResourceType, u32> {
+        let mut increased_costs = HashMap::new();
+        if let Some(recipe) = self.recipes.get(recipe_index) {
+            // Use the upgrade count to determine cost increase
+            let crafted_count = recipe.upgrade_count;
+            
+            // Increase costs by 50% for each previous craft
+            for (resource, &base_cost) in &recipe.requirements {
+                let increased = base_cost + (base_cost * crafted_count) / 2;
+                increased_costs.insert(resource.clone(), increased);
+            }
+        }
+        increased_costs
     }
 } 

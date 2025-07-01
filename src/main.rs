@@ -5,6 +5,8 @@ mod upgrades;
 mod islands;
 mod resource_types;
 mod crafting;
+mod word_lists;
+
 use pathfinding::{Grid, Position};
 use ascii_objects::ResourceObjects;
 use floating_text::FloatingTextManager;
@@ -12,6 +14,7 @@ use upgrades::UpgradeManager;
 use islands::IslandManager;
 use resource_types::ResourceType;
 use crafting::CraftingManager;
+use word_lists::{WordList, WordDifficulty};
 
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind},
@@ -39,10 +42,12 @@ use std::{
 struct Resource {
     position: Position,
     resource_type: ResourceType,
-    word: String,
+    craft_sentence: String,
+    next_craft_sentence: String,
     current_input: String,
     harvests_remaining: u32,
     max_harvests: u32,
+    path: Vec<Position>,  // Track path for this resource
 }
 
 // Using shared ResourceType from resource_types.rs
@@ -84,67 +89,76 @@ struct Game {
     island_manager: IslandManager,
     crafting: CraftingManager,
     debug_messages: Vec<String>,
+    word_list: WordList,
 }
 
 impl Game {
     fn new() -> Self {
         let mut rng = rand::thread_rng();
-        let words = vec![
-            "quick", "brown", "fox", "jumps", "over", "lazy", "dog",
-            "typing", "speed", "practice", "keyboard", "fingers",
-            "craft", "build", "create", "develop", "program",
-        ];
+        let word_list = WordList::new();
+        let mut resources = Vec::new();
+        let island_manager = IslandManager::new();
         
-        // Pick two different random words
-        let mut available_words = words.clone();
-        let first_word_idx = rng.gen_range(0..available_words.len());
-        let first_word = available_words.remove(first_word_idx);
-        let second_word_idx = rng.gen_range(0..available_words.len());
-        let second_word = available_words[second_word_idx].to_string();
-
-        let resources = vec![
-            {
-                let (min_harvests, max_harvests) = ResourceType::Wood.get_base_harvests();
+        // Start with half the max nodes
+        let current_island = island_manager.get_current_island();
+        let initial_nodes = current_island.max_nodes / 2;
+        
+        // Track positions for proper spacing
+        let mut existing_positions = Vec::new();
+        
+        // Spawn initial resources
+        for _ in 0..initial_nodes {
+            if let Some((x, y)) = island_manager.find_spawn_position(&existing_positions, 80, 24) {
+                existing_positions.push((x, y));
+                
+                // Create new resource
+                let resource_type = island_manager.get_random_resource_type();
+                let difficulty = match resource_type {
+                    ResourceType::Wood => WordDifficulty::Easy,
+                    ResourceType::Copper => WordDifficulty::Medium,
+                };
+                
+                let (min_harvests, max_harvests) = resource_type.get_base_harvests();
                 let max_harvests = rng.gen_range(min_harvests..=max_harvests);
-                Resource {
-                    position: Position::new(15, 10),
-                    resource_type: ResourceType::Wood,
-                    word: first_word.to_string(),
+                
+                let word = word_list.get_random_word(difficulty).to_string();
+                let next_word = word_list.get_random_word(difficulty).to_string();
+                
+                let new_resource = Resource {
+                    position: Position::new(x, y),
+                    resource_type,
+                    craft_sentence: word,
+                    next_craft_sentence: next_word,
                     current_input: String::new(),
                     harvests_remaining: max_harvests,
                     max_harvests,
-                }
-            },
-            {
-                let (min_harvests, max_harvests) = ResourceType::Copper.get_base_harvests();
-                let max_harvests = rng.gen_range(min_harvests..=max_harvests);
-                Resource {
-                    position: Position::new(45, 10),
-                    resource_type: ResourceType::Copper,
-                    word: second_word,
-                    current_input: String::new(),
-                    harvests_remaining: max_harvests,
-                    max_harvests,
-                }
-            },
-        ];
+                    path: Vec::new(),
+                };
+                
+                resources.push(new_resource);
+            }
+        }
         
         let mut grid = Grid::new();
         for resource in &resources {
             grid.add_obstacle(resource.position.clone());
         }
         
+        // Start player in middle of screen
+        let player = Player::new(40, 12);
+        
         Self {
-            player: Player::new(10, 10),
+            player,
             resources,
             last_update: Instant::now(),
             grid,
             resource_objects: ResourceObjects::new(),
             floating_texts: FloatingTextManager::new(),
             upgrades: UpgradeManager::new(),
-            island_manager: IslandManager::new(),
+            island_manager,
             crafting: CraftingManager::new(),
             debug_messages: Vec::new(),
+            word_list,
         }
     }
     
@@ -173,11 +187,15 @@ impl Game {
                 let rx = resource.position.x as usize;
                 let ry = resource.position.y as usize;
                 
+                // Get the path point for this resource
+                let (path_x, path_y) = obj.get_path_point(rx, ry);
+                let path_pos = Position::new(path_x as i32, path_y as i32);
+                
                 // Add obstacles for the entire object area except the path point
                 for dy in 0..h {
                     for dx in 0..w {
                         let pos = Position::new((rx + dx) as i32, (ry + dy) as i32);
-                        if pos != target {  // Don't block the target position
+                        if pos != path_pos {  // Don't block the path point
                             self.grid.add_obstacle(pos);
                         }
                     }
@@ -196,6 +214,8 @@ impl Game {
         let current_island = self.island_manager.get_current_island();
         if (self.resources.len() as u32) < current_island.max_nodes {
             if self.island_manager.should_spawn_node() {
+                let mut rng = rand::thread_rng();
+                
                 // Get existing positions
                 let existing_positions: Vec<(i32, i32)> = self.resources
                     .iter()
@@ -204,99 +224,158 @@ impl Game {
 
                 // Try to find a spawn position
                 if let Some((x, y)) = self.island_manager.find_spawn_position(&existing_positions, 80, 24) {
-                    // Get random word for the new resource
-                    let mut rng = rand::thread_rng();
-                    let words = vec![
-                        "quick", "brown", "fox", "jumps", "over", "lazy", "dog",
-                        "typing", "speed", "practice", "keyboard", "fingers",
-                        "craft", "build", "create", "develop", "program",
-                    ];
+                    // Create new resource
+                    let resource_type = self.island_manager.get_random_resource_type();
+                    let difficulty = match resource_type {
+                        ResourceType::Wood => WordDifficulty::Easy,
+                        ResourceType::Copper => WordDifficulty::Medium,
+                    };
                     
-                    // Get currently used words
-                    let used_words: Vec<String> = self.resources
-                        .iter()
-                        .map(|r| r.word.clone())
-                        .collect();
+                    let (min_harvests, max_harvests) = resource_type.get_base_harvests();
+                    let max_harvests = rng.gen_range(min_harvests..=max_harvests);
                     
-                    // Filter out used words
-                    let available_words: Vec<&str> = words
-                        .iter()
-                        .filter(|w| !used_words.contains(&w.to_string()))
-                        .copied()
-                        .collect();
+                    let word = self.word_list.get_random_word(difficulty).to_string();
+                    let next_word = self.word_list.get_random_word(difficulty).to_string();
                     
-                    if !available_words.is_empty() {
-                        let word = available_words[rng.gen_range(0..available_words.len())].to_string();
-                        
-                        // Create new resource
-                        let resource_type = self.island_manager.get_random_resource_type();
-                        
-                        // Calculate random harvest limit
-                        let (min_harvests, max_harvests) = resource_type.get_base_harvests();
-                        let max_harvests = rng.gen_range(min_harvests..=max_harvests);
-                        
-                        let new_resource = Resource {
-                            position: Position::new(x, y),
-                            resource_type,
-                            word,
-                            current_input: String::new(),
-                            harvests_remaining: max_harvests,
-                            max_harvests,
-                        };
-                        
-                        // Add the resource and update the grid
-                        self.grid.add_obstacle(new_resource.position.clone());
-                        self.resources.push(new_resource);
-                        
-                        // Show spawn notification
-                        self.floating_texts.add_text(
-                            "New Resource!".to_string(),
-                            x as f32,
-                            y as f32 - 1.0,
-                            Color::Cyan
-                        );
-                    }
+                    let new_resource = Resource {
+                        position: Position::new(x, y),
+                        resource_type,
+                        craft_sentence: word,
+                        next_craft_sentence: next_word,
+                        current_input: String::new(),
+                        harvests_remaining: max_harvests,
+                        max_harvests,
+                        path: Vec::new(),
+                    };
+                    
+                    // Add the resource and update the grid
+                    self.grid.add_obstacle(new_resource.position.clone());
+                    self.resources.push(new_resource);
+                    
+                    // Show spawn notification
+                    self.floating_texts.add_text(
+                        "New Resource!".to_string(),
+                        x as f32,
+                        y as f32 - 1.0,
+                        Color::Cyan
+                    );
                 }
             }
         }
     }
 
     fn harvest_resource(&mut self) {
-        // Find resource at player's position that has a completed word
-        if let Some(resource) = self.resources.iter_mut().find(|r| {
-            r.position == self.player.position && 
-            r.current_input == r.word
-        }) {
-            // Get the resource to check harvests remaining
-            resource.harvests_remaining = resource.harvests_remaining.saturating_sub(1);
-            
-            // Update resources and show floating text
-            let (amount, text, color) = match resource.resource_type {
-                ResourceType::Wood => {
-                    let multiplier = self.upgrades.get_multiplier(&ResourceType::Wood);
-                    let amount = (multiplier as u32).max(1);
-                    self.player.wood += amount;
-                    (amount, "Wood".to_string(), ResourceType::Wood.get_color())
-                },
-                ResourceType::Copper => {
-                    let multiplier = self.upgrades.get_multiplier(&ResourceType::Copper);
-                    let amount = (multiplier as u32).max(1);
-                    self.player.copper += amount;
-                    (amount, "Copper".to_string(), ResourceType::Copper.get_color())
-                },
+        // First find the index of the resource to harvest
+        let mut harvest_idx = None;
+        let mut harvest_amount = 0;
+        let mut harvest_text = String::new();
+        let mut harvest_color = Color::White;
+
+        // Find the resource to harvest
+        for (idx, resource) in self.resources.iter().enumerate() {
+            let target_pos = if let Some(obj) = match resource.resource_type {
+                ResourceType::Wood => self.resource_objects.get("tree"),
+                ResourceType::Copper => self.resource_objects.get("copper"),
+            } {
+                let (x, y) = obj.get_path_point(resource.position.x as usize, resource.position.y as usize);
+                Position::new(x as i32, y as i32)
+            } else {
+                resource.position.clone()
             };
-            
+
+            let distance = self.player.position.manhattan_distance(&target_pos);
+            if distance <= 2 && resource.current_input == resource.craft_sentence {
+                // Calculate harvest amount and text
+                let (amount, text, color) = match resource.resource_type {
+                    ResourceType::Wood => {
+                        let multiplier = self.upgrades.get_multiplier(&ResourceType::Wood);
+                        let amount = (multiplier as u32).max(1);
+                        self.player.wood += amount;
+                        (amount, "Wood".to_string(), ResourceType::Wood.get_color())
+                    },
+                    ResourceType::Copper => {
+                        let multiplier = self.upgrades.get_multiplier(&ResourceType::Copper);
+                        let amount = (multiplier as u32).max(1);
+                        self.player.copper += amount;
+                        (amount, "Copper".to_string(), ResourceType::Copper.get_color())
+                    },
+                };
+                harvest_idx = Some(idx);
+                harvest_amount = amount;
+                harvest_text = text;
+                harvest_color = color;
+                break;
+            }
+        }
+
+        // Process the harvest if we found a resource
+        if let Some(idx) = harvest_idx {
             // Show floating text
             self.floating_texts.add_text(
-                format!("+{} {}", amount, text),
+                format!("+{} {}", harvest_amount, harvest_text),
                 self.player.position.x as f32,
                 self.player.position.y as f32 - 1.0,
-                color
+                harvest_color
             );
-            
-            // Clear the input
-            resource.current_input.clear();
-            
+
+            // Update the resource
+            if let Some(resource) = self.resources.get_mut(idx) {
+                resource.harvests_remaining = resource.harvests_remaining.saturating_sub(1);
+                resource.current_input.clear();
+
+                // Check if this was the last node and it's depleted
+                if resource.harvests_remaining == 0 {
+                    // Remove depleted resources
+                    self.resources.retain(|r| r.harvests_remaining > 0);
+
+                    // If no resources left, respawn max_nodes
+                    if self.resources.is_empty() {
+                        let current_island = self.island_manager.get_current_island();
+                        self.floating_texts.add_text(
+                            "CLEAR! Respawning nodes...".to_string(),
+                            40.0, // Center of screen
+                            12.0,
+                            Color::Cyan
+                        );
+
+                        // Spawn max_nodes new resources
+                        let mut rng = rand::thread_rng();
+                        let mut existing_positions = Vec::new();
+                        for _ in 0..current_island.max_nodes {
+                            if let Some((x, y)) = self.island_manager.find_spawn_position(&existing_positions, 80, 24) {
+                                existing_positions.push((x, y));
+                                
+                                // Create new resource
+                                let resource_type = self.island_manager.get_random_resource_type();
+                                let difficulty = match resource_type {
+                                    ResourceType::Wood => WordDifficulty::Easy,
+                                    ResourceType::Copper => WordDifficulty::Medium,
+                                };
+                                
+                                let (min_harvests, max_harvests) = resource_type.get_base_harvests();
+                                let max_harvests = rng.gen_range(min_harvests..=max_harvests);
+                                
+                                let word = self.word_list.get_random_word(difficulty).to_string();
+                                let next_word = self.word_list.get_random_word(difficulty).to_string();
+                                
+                                let new_resource = Resource {
+                                    position: Position::new(x, y),
+                                    resource_type,
+                                    craft_sentence: word,
+                                    next_craft_sentence: next_word,
+                                    current_input: String::new(),
+                                    harvests_remaining: max_harvests,
+                                    max_harvests,
+                                    path: Vec::new(),
+                                };
+                                
+                                self.resources.push(new_resource);
+                            }
+                        }
+                    }
+                }
+            }
+
             // Try to spawn a new resource
             self.try_spawn_resource();
         }
@@ -336,100 +415,157 @@ impl Game {
             // Process each word independently
             for (resource_idx, resource) in self.resources.iter_mut().enumerate() {
                 let current_pos = resource.current_input.len();
-                let target_word = &resource.word;
+                let target_word = &resource.craft_sentence;
+                
+                debug_messages.push(format!(">>> WORD CHECK: '{}' (current input: '{}', pos: {})", 
+                    target_word, resource.current_input, current_pos));
 
-                // If this letter matches the next expected letter for this word, add it
-                if current_pos < target_word.len() && target_word.chars().nth(current_pos) == Some(c) {
-                    // If we're just starting or continuing the word
-                    resource.current_input.push(c);
+                // If we haven't started this word yet, check if this is the first letter
+                if current_pos == 0 {
+                    let expected = target_word.chars().next();
+                    debug_messages.push(format!(">>> FIRST LETTER CHECK: Expected '{}', got '{}'", 
+                        expected.unwrap_or('?'), c));
                     
-                    // If this is the first letter, calculate the path
-                    if current_pos == 0 {
-                        debug_messages.push(format!("Started word '{}' with '{}'", target_word, c));
-                        debug_messages.push(format!("Player at {:?}, calculating path to {:?}", self.player.position, resource.position));
+                    if expected == Some(c) {
+                        // Start this word
+                        resource.current_input.push(c);
+                        debug_messages.push(format!(">>> STARTED: New word '{}' with '{}'", target_word, c));
+                        
+                        // Calculate initial path
+                        let target_pos = if let Some(obj) = match resource.resource_type {
+                            ResourceType::Wood => self.resource_objects.get("tree"),
+                            ResourceType::Copper => self.resource_objects.get("copper"),
+                        } {
+                            let (x, y) = obj.get_path_point(resource.position.x as usize, resource.position.y as usize);
+                            Position::new(x as i32, y as i32)
+                        } else {
+                            resource.position.clone()
+                        };
+
+                        debug_messages.push(format!(">>> PATH: From {:?} to {:?}", self.player.position, target_pos));
                         
                         // Clear and rebuild grid obstacles
                         self.grid.clear_obstacles();
+                        let mut obstacle_count = 0;
                         for (pos, (rx, ry, w, h)) in &resource_obstacles {
                             if *pos != resource.position {  // Don't block target
                                 // Add obstacles for the object area
                                 for dy in 0..*h {
                                     for dx in 0..*w {
-                                        self.grid.add_obstacle(Position::new((*rx + dx) as i32, (*ry + dy) as i32));
+                                        let obstacle_pos = Position::new((*rx + dx) as i32, (*ry + dy) as i32);
+                                        if obstacle_pos != target_pos {  // Don't block the actual target point
+                                            self.grid.add_obstacle(obstacle_pos);
+                                            obstacle_count += 1;
+                                        }
                                     }
                                 }
                             }
                         }
+                        debug_messages.push(format!("Added {} obstacles to grid", obstacle_count));
 
-                        if let Some(path) = self.grid.find_path(self.player.position.clone(), resource.position.clone()) {
-                            debug_messages.push(format!("Found path with {} steps", path.len()));
-                            self.player.path = path;
-                            self.player.target = Some(resource.position.clone());
+                        if let Some(path) = self.grid.find_path(self.player.position.clone(), target_pos.clone()) {
+                            debug_messages.push(format!(">>> PATH: Found {} steps", path.len()));
+                            resource.path = path;  // Store path in the resource
+                            self.player.target = Some(target_pos);
                         } else {
-                            debug_messages.push("No path found!".to_string());
+                            debug_messages.push(">>> PATH: No path found!".to_string());
                         }
-                    } else {
-                        debug_messages.push(format!("Continued word '{}' with '{}'", target_word, c));
-                    }
 
-                    // Move one step for each correct letter
-                    debug_messages.push(format!("Path has {} steps remaining", self.player.path.len()));
-                    if !self.player.path.is_empty() {
-                        let old_pos = self.player.position.clone();
-                        self.player.position = self.player.path.remove(0);
-                        debug_messages.push(format!("Moved from {:?} to {:?}", old_pos, self.player.position));
-                    } else {
-                        debug_messages.push("No steps left in path!".to_string());
-                    }
-
-                    // Check if we completed the word
-                    if resource.current_input == *target_word {
-                        let distance = self.player.position.manhattan_distance(&resource.position);
-                        if distance <= 1 {
-                            debug_messages.push("Word complete and close enough, marking for harvest".to_string());
-                            should_harvest = true;
+                        // Move first step
+                        if !resource.path.is_empty() {
+                            let old_pos = self.player.position.clone();
+                            self.player.position = resource.path.remove(0);
+                            debug_messages.push(format!(">>> MOVE: From {:?} to {:?} ({} steps left)", 
+                                old_pos, self.player.position, resource.path.len()));
                         }
-                        completed_word_idx = Some(resource_idx);
                     }
                 }
-                // If we've started typing this word but got a wrong letter, clear it
-                else if current_pos > 0 {
-                    debug_messages.push(format!("Wrong letter for '{}', clearing input", target_word));
-                    resource.current_input.clear();
-                    // Clear path when we make a mistake
-                    self.player.path.clear();
-                    self.player.target = None;
+                // If we've started this word, continue it
+                else {
+                    let expected = target_word.chars().nth(current_pos);
+                    debug_messages.push(format!(">>> CONTINUE CHECK: Expected '{}', got '{}'", 
+                        expected.unwrap_or('?'), c));
+                    
+                    if expected == Some(c) {
+                        // Continue the word
+                        resource.current_input.push(c);
+                        debug_messages.push(format!(">>> MATCHED: Added '{}' to word. Now: '{}'", 
+                            c, resource.current_input));
+
+                        // Move one step
+                        if !resource.path.is_empty() {
+                            let old_pos = self.player.position.clone();
+                            self.player.position = resource.path.remove(0);
+                            debug_messages.push(format!(">>> MOVE: From {:?} to {:?} ({} steps left)", 
+                                old_pos, self.player.position, resource.path.len()));
+                        }
+
+                        // Check if word is complete
+                        if resource.current_input == *target_word {
+                            debug_messages.push(format!(">>> COMPLETE: Word '{}' finished!", target_word));
+                            completed_word_idx = Some(resource_idx);
+                            
+                            // Get the target position
+                            let target_pos = if let Some(obj) = match resource.resource_type {
+                                ResourceType::Wood => self.resource_objects.get("tree"),
+                                ResourceType::Copper => self.resource_objects.get("copper"),
+                            } {
+                                let (x, y) = obj.get_path_point(resource.position.x as usize, resource.position.y as usize);
+                                Position::new(x as i32, y as i32)
+                            } else {
+                                resource.position.clone()
+                            };
+
+                            let distance = self.player.position.manhattan_distance(&target_pos);
+                            debug_messages.push(format!(">>> HARVEST CHECK: Distance = {}, Position = {:?}, Target = {:?}", 
+                                distance, self.player.position, target_pos));
+
+                            if distance <= 2 {
+                                debug_messages.push(">>> HARVEST: Close enough to harvest!".to_string());
+                                should_harvest = true;
+                            } else {
+                                debug_messages.push(">>> HARVEST: Too far to harvest yet, continuing to move".to_string());
+                                // Clear any existing path and calculate new path to target
+                                resource.path.clear();
+                                if let Some(path) = self.grid.find_path(self.player.position.clone(), target_pos.clone()) {
+                                    debug_messages.push(format!(">>> PATH: {} steps to get in range", path.len()));
+                                    resource.path = path;
+                                    self.player.target = Some(target_pos);
+                                    // Move one step along the new path immediately
+                                    if !resource.path.is_empty() {
+                                        let old_pos = self.player.position.clone();
+                                        self.player.position = resource.path.remove(0);
+                                        debug_messages.push(format!(">>> MOVE: From {:?} to {:?} ({} steps left)", 
+                                            old_pos, self.player.position, resource.path.len()));
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Wrong letter, clear this word
+                        debug_messages.push(format!(">>> WRONG: Expected '{}', got '{}'. Clearing word '{}'", 
+                            expected.unwrap_or('?'), c, target_word));
+                        resource.current_input.clear();
+                        resource.path.clear();
+                    }
                 }
             }
 
             // Handle harvest after the loop
             if should_harvest {
-                debug_messages.push("Harvesting resource".to_string());
+                debug_messages.push(">>> EXECUTING HARVEST".to_string());
                 self.harvest_resource();
                 self.player.target = None;
-                self.player.path.clear();
             }
 
             // Replace completed word with a new one
             if let Some(idx) = completed_word_idx {
-                let mut rng = rand::thread_rng();
-                let words = vec![
-                    "quick", "brown", "fox", "jumps", "over", "lazy", "dog",
-                    "typing", "speed", "practice", "keyboard", "fingers",
-                    "craft", "build", "create", "develop", "program",
-                ];
-                let word = words[rng.gen_range(0..words.len())].to_string();
-                if let Some(resource) = self.resources.get_mut(idx) {
-                    debug_messages.push(format!("Replacing completed word '{}' with '{}'", resource.word, word));
-                    resource.word = word;
-                    resource.current_input.clear();
-                }
+                debug_messages.push(format!(">>> REPLACING completed word at index {}", idx));
+                self.replace_word(idx);
             }
 
             // Add all debug messages
-            for message in debug_messages {
-                self.add_debug_message(message);
-            }
+            self.debug_messages.extend(debug_messages);
         }
     }
 
@@ -442,8 +578,27 @@ impl Game {
             for x in 0..game_area.width {
                 let pos = Position::new(x as i32, y as i32);
                 
+                // Add resource counter at top-right if we're at the right position
+                if y == 0 && x >= game_area.width.saturating_sub(30) {
+                    if x == game_area.width.saturating_sub(30) {
+                        let wood_text = format!("Wood: {}", self.player.wood);
+                        let copper_text = format!("Copper: {}", self.player.copper);
+                        line_spans.push(Span::styled(
+                            wood_text,
+                            Style::default().fg(ResourceType::Wood.get_color())
+                        ));
+                        line_spans.push(Span::raw(" | "));
+                        line_spans.push(Span::styled(
+                            copper_text,
+                            Style::default().fg(ResourceType::Copper.get_color())
+                        ));
+                        // Skip the rest of this line
+                        break;
+                    }
+                    continue;
+                }
+                
                 // Check if player is here
-                // Check if this position contains player or resource
                 let span = if pos == self.player.position {
                     Span::styled("@", Style::default().fg(Color::Blue))
                 } else {
@@ -477,19 +632,34 @@ impl Game {
                             
                             // Position the word centered above the resource
                             if y as usize == ry - 1 {
-                                let word_start = rx.saturating_sub(resource.word.len() / 2);
-                                let word_end = word_start + resource.word.len();
+                                let word_start = rx.saturating_sub(resource.craft_sentence.len() / 2);
+                                let word_end = word_start + resource.craft_sentence.len();
                                 let x_pos = x as usize;
                                 
+                                // Current word
                                 if x_pos >= word_start && x_pos < word_end {
                                     let char_idx = x_pos - word_start;
-                                    if let Some(c) = resource.word.chars().nth(char_idx) {
+                                    if let Some(c) = resource.craft_sentence.chars().nth(char_idx) {
                                         let style = if char_idx < resource.current_input.len() {
                                             Style::default().fg(Color::Green)
                                         } else {
                                             Style::default().fg(Color::White)
                                         };
                                         word_span = Some(Span::styled(c.to_string(), style));
+                                    }
+                                }
+                                // Next word (if not on last harvest)
+                                else if resource.harvests_remaining > 1 {
+                                    let next_start = word_end + 1; // One space after current word
+                                    let next_end = next_start + resource.next_craft_sentence.len();
+                                    if x_pos >= next_start && x_pos < next_end {
+                                        let char_idx = x_pos - next_start;
+                                        if let Some(c) = resource.next_craft_sentence.chars().nth(char_idx) {
+                                            word_span = Some(Span::styled(
+                                                c.to_string(),
+                                                Style::default().fg(Color::DarkGray)
+                                            ));
+                                        }
                                     }
                                 }
                             }
@@ -578,7 +748,7 @@ impl Game {
                 // Show typing progress
                 if !recipe.current_input.is_empty() {
                     spans.push(Span::raw(" | "));
-                    for (i, c) in recipe.word.chars().enumerate() {
+                    for (i, c) in recipe.craft_sentence.chars().enumerate() {
                         spans.push(Span::styled(
                             c.to_string(),
                             if i < recipe.current_input.len() {
@@ -613,6 +783,31 @@ impl Game {
             .wrap(Wrap { trim: true });
 
         f.render_widget(debug_widget, area);
+    }
+
+    fn get_next_word(&self, resource_type: ResourceType) -> String {
+        let difficulty = match resource_type {
+            ResourceType::Wood => WordDifficulty::Easy,
+            ResourceType::Copper => WordDifficulty::Medium,
+        };
+        self.word_list.get_random_word(difficulty).to_string()
+    }
+
+    fn replace_word(&mut self, idx: usize) {
+        // First get the resource type and generate the new word
+        let resource_type = self.resources.get(idx)
+            .map(|r| r.resource_type.clone())
+            .unwrap_or(ResourceType::Wood);
+        let new_next = self.get_next_word(resource_type);
+        
+        // Then update the resource
+        if let Some(resource) = self.resources.get_mut(idx) {
+            self.debug_messages.push(format!(">>> WORD REPLACE: '{}' -> '{}', next will be '{}'", 
+                resource.craft_sentence, resource.next_craft_sentence, new_next));
+            resource.craft_sentence = resource.next_craft_sentence.clone();
+            resource.next_craft_sentence = new_next;
+            resource.current_input.clear();
+        }
     }
 }
 

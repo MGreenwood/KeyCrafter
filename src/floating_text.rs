@@ -16,7 +16,7 @@ impl FloatingText {
             text,
             x,
             y,
-            velocity_y: -4.0,  // Move upward faster
+            velocity_y: 4.0,  // Move downward
             color,
             created_at: Instant::now(),
             lifetime: Duration::from_millis(800),  // Show for 0.8 seconds
@@ -24,11 +24,11 @@ impl FloatingText {
     }
 
     pub fn update(&mut self, dt: Duration) {
-        // Move text upward
+        // Move text downward
         let dt_secs = dt.as_secs_f32();
         self.y += self.velocity_y * dt_secs;
         
-        // Slow down the upward movement
+        // Slow down the downward movement
         self.velocity_y *= 0.90;  // Slow down faster
     }
 

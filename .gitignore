@@ -1,0 +1,35 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# SSH Keys and Auth
+/ssh_keys/
+keycrafter_download*
+authorized_keys/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Debug files
+*.pdb
+*.log
+
+# Binary files
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Backup files
+*.bak
+*.backup
+*~ 
