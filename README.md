@@ -2,6 +2,20 @@
 
 A terminal-based typing game disguised as a resource gathering/crafting adventure. Improve your typing speed while exploring islands and collecting resources!
 
+## Quick Install
+
+### Windows (PowerShell)
+```powershell
+irm play.keycrafter.fun/install.ps1 | iex
+```
+
+### Linux/Mac
+```bash
+curl -fsSL play.keycrafter.fun/install.sh | bash
+```
+
+After installing, just type `keycrafter` in your terminal to play!
+
 ## Features
 
 - **Console-based gameplay** - Runs entirely in your terminal
@@ -9,7 +23,7 @@ A terminal-based typing game disguised as a resource gathering/crafting adventur
 - **Pathfinding** - Your character automatically navigates to resources using A* pathfinding
 - **Real-time feedback** - Letters turn green as you type them correctly, reset on mistakes
 - **Resource collection** - Gather wood from trees and copper from ore deposits
-- **Lightweight** - Single binary, easily distributable via SSH
+- **Lightweight** - Single binary, easily distributable
 
 ## How to Play
 
@@ -21,7 +35,7 @@ A terminal-based typing game disguised as a resource gathering/crafting adventur
 4. **Collect resources** - When your character reaches the resource, you'll gain materials and get a new word
 5. **Quit** - Press 'q' to exit, or 'Esc' to deselect current resource
 
-## Installation & Running
+## Building from Source
 
 ### Prerequisites
 - Rust (install from https://rustup.rs/)
@@ -34,20 +48,8 @@ cd KeyCrafter
 # Build and run in one command
 cargo run
 
-# Or build a release binary for distribution
+# Or build a release binary
 cargo build --release
-# Binary will be at ./target/release/keycrafter
-```
-
-### Distribution via SSH
-The compiled binary is completely self-contained and can be easily shared:
-```bash
-# Copy to remote server
-scp target/release/keycrafter user@server:/path/to/destination/
-
-# Run on remote server
-ssh user@server
-./keycrafter
 ```
 
 ## Game Mechanics

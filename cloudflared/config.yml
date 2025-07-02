@@ -1,0 +1,9 @@
+tunnel: 552ba21b-d360-4141-9aa0-f28c89c9b4de
+credentials-file: /etc/cloudflared/552ba21b-d360-4141-9aa0-f28c89c9b4de.json
+
+ingress:
+  - hostname: play.keycrafter.fun
+    service: http://keycrafter-web:80
+  - hostname: keycrafter.fun
+    service: http://keycrafter-web:80
+  - service: http_status:404 

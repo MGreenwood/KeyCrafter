@@ -1,0 +1,45 @@
+{
+    "decorations": [
+        {
+            "type": "tree",
+            "art": [
+                " /\\ ",
+                "/~~\\",
+                " || ",
+                " || "
+            ],
+            "color": "green",
+            "positions": [
+                {"x": 5, "y": 3},
+                {"x": 15, "y": 5},
+                {"x": 25, "y": 4},
+                {"x": 35, "y": 6}
+            ]
+        },
+        {
+            "type": "copper",
+            "art": [
+                " /\\ ",
+                "(Cu)",
+                "\\__/",
+                " || "
+            ],
+            "color": "yellow",
+            "positions": [
+                {"x": 10, "y": 8},
+                {"x": 20, "y": 7},
+                {"x": 30, "y": 9},
+                {"x": 40, "y": 8}
+            ]
+        }
+    ],
+    "animations": {
+        "title_fade": {
+            "frames": 10,
+            "delay_ms": 100
+        },
+        "press_key": {
+            "blink_rate_ms": 800
+        }
+    }
+} 

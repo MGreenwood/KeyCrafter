@@ -1,0 +1,27 @@
+{
+  "application": {
+    "name": "KeyCrafter SSH Terminal",
+    "domain": "keycrafter.fun",
+    "type": "ssh",
+    "session_duration": "24h",
+    "browser_ssh_enabled": true,
+    "allow_unauthenticated": true
+  },
+  "policies": [
+    {
+      "name": "Allow Anonymous Access",
+      "decision": "bypass",
+      "include": [
+        {
+          "everyone": {}
+        }
+      ]
+    }
+  ],
+  "browser_ssh": {
+    "enabled": true,
+    "shell": "/home/guest/sftp-shell/custom-shell.sh",
+    "username": "guest",
+    "authentication_method": "access_token"
+  }
+} 

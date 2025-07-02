@@ -1,0 +1,14 @@
+# PAM configuration for Cloudflare Access
+# This allows passwordless authentication for users authenticated via Cloudflare Access
+
+auth sufficient pam_permit.so
+auth required pam_deny.so
+
+account sufficient pam_permit.so
+account required pam_deny.so
+
+password sufficient pam_permit.so
+password required pam_deny.so
+
+session required pam_env.so
+session optional pam_lastlog.so 

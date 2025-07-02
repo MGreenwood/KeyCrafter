@@ -1,0 +1,27 @@
+KeyCrafter is more than just a typing game - it's a mindful break in your workday.
+
+In our fast-paced development world, we often forget to take meaningful breaks. KeyCrafter 
+transforms these breaks into moments of both rest and improvement. As you gather resources 
+and explore the world, you're not just playing a game - you're maintaining your typing 
+skills, a crucial tool in any developer's arsenal.
+
+Built with Rust and love for the terminal, KeyCrafter embraces the philosophy that 
+productivity tools should be both useful and enjoyable. The game features:
+
+  🌳 Resource gathering through typing
+  🎯 Distance-based harvesting mechanics
+  📝 Progressive word difficulty
+  🎨 ASCII art visuals
+  🔄 Dynamic resource respawning
+
+Take a moment. Type a few words. Watch your resources grow.
+Sometimes the best way to keep coding is to stop coding - just for a little while.
+
+Technical Stack:
+- Rust 🦀
+- Ratatui (Terminal UI)
+- A* Pathfinding
+- Custom ASCII Art Engine
+- SFTP Distribution
+
+Press 'b' to go back 
