@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "player_wood": 19,
+  "player_copper": 7,
+  "completed_items": [],
+  "has_workbench": false,
+  "axe_upgrade_count": 0,
+  "pickaxe_upgrade_count": 0,
+  "stats": {
+    "words_typed": 28,
+    "characters_typed": 121,
+    "resources_harvested": {
+      "Copper": 7,
+      "Wood": 19
+    },
+    "total_play_time_seconds": 28169,
+    "session_start_time": 1751507117,
+    "words_completed": 28,
+    "crafting_attempts": 0,
+    "successful_crafts": 0,
+    "mistakes_made": 43,
+    "fastest_word_time": 0.0000296,
+    "average_wpm": 0.15030867
+  },
+  "save_timestamp": 1751507117
+}

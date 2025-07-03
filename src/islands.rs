@@ -32,11 +32,11 @@ impl IslandManager {
             resource_pools: vec![
                 ResourcePool {
                     resource_type: ResourceType::Wood,
-                    weight: 70,
+                    weight: 60,
                 },
                 ResourcePool {
                     resource_type: ResourceType::Copper,
-                    weight: 30,
+                    weight: 50,
                 },
             ],
             max_nodes: 6,

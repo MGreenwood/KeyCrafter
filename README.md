@@ -16,6 +16,9 @@ curl -fsSL play.keycrafter.fun/install.sh | bash
 
 After installing, just type `keycrafter` in your terminal to play!
 
+### Manual Installation
+If you prefer, you can download the binaries directly from our [GitHub releases](https://github.com/MGreenwood/KeyCrafter/releases).
+
 ## Features
 
 - **Console-based gameplay** - Runs entirely in your terminal
@@ -23,7 +26,7 @@ After installing, just type `keycrafter` in your terminal to play!
 - **Pathfinding** - Your character automatically navigates to resources using A* pathfinding
 - **Real-time feedback** - Letters turn green as you type them correctly, reset on mistakes
 - **Resource collection** - Gather wood from trees and copper from ore deposits
-- **Lightweight** - Single binary, easily distributable
+- **Cross-platform** - Runs on Windows, Linux, and Mac with easy installation
 
 ## How to Play
 
@@ -34,23 +37,6 @@ After installing, just type `keycrafter` in your terminal to play!
 3. **Watch your character move** - Once you complete a word, your character (■) will pathfind to that resource
 4. **Collect resources** - When your character reaches the resource, you'll gain materials and get a new word
 5. **Quit** - Press 'q' to exit, or 'Esc' to deselect current resource
-
-## Building from Source
-
-### Prerequisites
-- Rust (install from https://rustup.rs/)
-
-### Build and Run
-```bash
-# Clone or download the project
-cd KeyCrafter
-
-# Build and run in one command
-cargo run
-
-# Or build a release binary
-cargo build --release
-```
 
 ## Game Mechanics
 
@@ -68,6 +54,24 @@ cargo build --release
 - **Esc** - Deselect current resource (or quit if nothing selected)
 - **q** - Quit game
 - **F10** - Quick exit (works anytime)
+
+## Building from Source
+
+### Prerequisites
+- Rust (install from https://rustup.rs/)
+
+### Build Steps
+```bash
+# Clone the repository
+git clone https://github.com/MGreenwood/KeyCrafter.git
+cd KeyCrafter
+
+# Build and run in one command
+cargo run
+
+# Or build a release binary
+cargo build --release
+```
 
 ## Technical Details
 

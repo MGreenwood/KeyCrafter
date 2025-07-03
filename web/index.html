@@ -1,75 +1,141 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>KeyCrafter Terminal</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&display=swap');
-        
-        body {
-            margin: 0;
-            padding: 0;
-            background: #000;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
-        }
-        #terminal {
-            width: 100%;
-            height: 100%;
-            padding: 10px;
-        }
-        .xterm-viewport::-webkit-scrollbar {
-            width: 8px;
-        }
-        .xterm-viewport::-webkit-scrollbar-track {
-            background: #1a1a1a;
-        }
-        .xterm-viewport::-webkit-scrollbar-thumb {
-            background: #333;
-            border-radius: 4px;
-        }
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KeyCrafter - Terminal Crafting Game</title>
+    
+    <!-- Primary Meta Tags -->
+    <meta name="title" content="KeyCrafter - Terminal Crafting Game">
+    <meta name="description" content="A typing-based crafting game where you type words to gather resources and craft items. Improve your typing skills while exploring a world of crafting and building.">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://keycrafter.fun/">
+    <meta property="og:title" content="KeyCrafter - Terminal Crafting Game">
+    <meta property="og:description" content="A typing-based crafting game where you type words to gather resources and craft items. Improve your typing skills while exploring a world of crafting and building.">
+    <meta property="og:image" content="https://keycrafter.fun/images/preview.png">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://keycrafter.fun/">
+    <meta property="twitter:title" content="KeyCrafter - Terminal Crafting Game">
+    <meta property="twitter:description" content="A typing-based crafting game where you type words to gather resources and craft items. Improve your typing skills while exploring a world of crafting and building.">
+    <meta property="twitter:image" content="https://keycrafter.fun/images/preview.png">
+
+    <link rel="icon" type="image/jpg" href="images/hero-bg.jpg">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="terminal"></div>
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-    <script>
-        const term = new Terminal({
-            cursorBlink: true,
-            fontFamily: "'JetBrains Mono', 'Consolas', 'Courier New', monospace",
-            fontSize: 14,
-            lineHeight: 1.2,
-            theme: {
-                background: '#000000',
-                foreground: '#ffffff',
-                cursor: '#ffffff',
-                cursorAccent: '#000000',
-                selection: 'rgba(255, 255, 255, 0.3)'
-            }
-        });
-        term.open(document.getElementById('terminal'));
+    <header>
+        <nav>
+            <div class="logo">KeyCrafter</div>
+            <div class="nav-links">
+                <a href="#about">About</a>
+                <a href="#install">Install</a>
+                <a href="#support">Support</a>
+            </div>
+        </nav>
+    </header>
 
-        const ws = new WebSocket(`wss://${window.location.hostname}/terminal`);
-        
-        ws.onopen = () => {
-            term.write('Connecting to KeyCrafter...\r\n');
-        };
+    <main>
+        <section id="hero" class="terminal-bg">
+            <div class="terminal-window">
+                <div class="terminal-header">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                </div>
+                <div class="terminal-content">
+                    <pre class="ascii-art">
+██╗  ██╗███████╗██╗   ██╗ ██████╗██████╗  █████╗ ███████╗████████╗███████╗██████╗ 
+██║ ██╔╝██╔════╝╚██╗ ██╔╝██╔════╝██╔══██╗██╔══██╗██╔════╝╚══██╔══╝██╔════╝██╔══██╗
+█████╔╝ █████╗   ╚████╔╝ ██║     ██████╔╝███████║█████╗     ██║   █████╗  ██████╔╝
+██╔═██╗ ██╔══╝    ╚██╔╝  ██║     ██╔══██╗██╔══██║██╔══╝     ██║   ██╔══╝  ██╔══██╗
+██║  ██╗███████╗   ██║   ╚██████╗██║  ██║██║  ██║██║        ██║   ███████╗██║  ██║
+╚═╝  ╚═╝╚══════╝   ╚═╝    ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝        ╚═╝   ╚══════╝╚═╝  ╚═╝ 
+                                                  
+Type to craft, explore, and build!
+                    </pre>
+                    <div class="typing-effect">
+                        <span class="typed-text">wood</span>
+                        <span class="cursor"></span>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-        ws.onmessage = (event) => {
-            term.write(event.data);
-        };
+        <section id="about">
+            <h2>About KeyCrafter</h2>
+            <p>KeyCrafter is a typing-based crafting game where you type words to gather resources and craft items. It's a fun and challenging way to improve your typing skills while exploring a world of crafting and building.</p>
+            <div class="features">
+                <div class="feature">
+                    <h3> Type & Craft</h3>
+                    <p>Improve your typing skills while gathering resources and crafting tools.</p>
+                </div>
+                <div class="feature">
+                    <h3> Resource Gathering</h3>
+                    <p>Collect wood, copper, and more by typing words to move and harvest.</p>
+                </div>
+                <div class="feature">
+                    <h3>️ Crafting System</h3>
+                    <p>Build workbenches, upgrade tools, and enhance your gathering abilities.</p>
+                </div>
+                <div class="feature">
+                    <h3> Progress Tracking</h3>
+                    <p>Track your typing speed, accuracy, as well as your game progress automatically!</p>
+                </div>
+            </div>
+        </section>
 
-        term.onData((data) => {
-            ws.send(data);
-        });
+        <section id="install">
+            <h2>Installation</h2>
+            <div class="install-options">
+                <div class="install-option">
+                    <h3>Windows</h3>
+                    <pre><code>irm play.keycrafter.fun/install.ps1 | iex</code></pre>
+                    <button class="copy-btn" data-code="irm play.keycrafter.fun/install.ps1 | iex">Copy</button>
+                </div>
+                <div class="install-option">
+                    <h3>Linux/Mac</h3>
+                    <pre><code>curl -fsSL play.keycrafter.fun/install.sh | bash</code></pre>
+                    <button class="copy-btn" data-code="curl -fsSL play.keycrafter.fun/install.sh | bash">Copy</button>
+                </div>
+            </div>
+        </section>
 
-        ws.onclose = () => {
-            term.write('\r\nConnection closed.\r\n');
-        };
-    </script>
+        <section id="launch">
+            <h2>Getting Started</h2>
+            <div class="launch-instructions">
+                <p>After installation, you can start playing:</p>
+                <pre class="command-line"><code>keycrafter</code></pre>
+                
+                <p>To keep your game up to date:</p>
+                <pre class="command-line"><code>keycrafter update</code></pre>
+            </div>
+        </section>
+
+        <section id="support">
+            <div class="support-options">
+                <div style="text-align: center; width: 100%;">
+                    <a href="https://www.buymeacoffee.com/keycrafter" target="_blank">
+                        <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;">
+                    </a>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="footer-content">
+            <div class="footer-links">
+            </div>
+            <div class="footer-text">
+                Made with ❤️ by the KeyCrafter team
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
 </body>
 </html> 

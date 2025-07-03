@@ -15,7 +15,8 @@ pub struct Recipe {
 pub struct CraftingManager {
     recipes: Vec<Recipe>,
     unlocked_recipes: Vec<bool>,  // Parallel vec to track what's unlocked
-    has_workbench: bool,  // Track if workbench has been crafted
+    pub has_workbench: bool,  // Track if workbench has been crafted
+    completed_items: Vec<String>,  // Track completed one-time items
 }
 
 impl CraftingManager {
@@ -24,6 +25,7 @@ impl CraftingManager {
             recipes: Vec::new(),
             unlocked_recipes: Vec::new(),
             has_workbench: false,
+            completed_items: Vec::new(),
         };
 
         // Add initial recipe - Workbench
@@ -87,9 +89,33 @@ impl CraftingManager {
 
     pub fn is_recipe_unlocked(&self, index: usize) -> bool {
         if index == 0 {  // Workbench is special
-            true  // Always available
+            !self.has_workbench  // Only show if not yet crafted
         } else {
             self.has_workbench && self.unlocked_recipes.get(index).copied().unwrap_or(false)
+        }
+    }
+
+    pub fn get_completed_items(&self) -> &[String] {
+        &self.completed_items
+    }
+
+    pub fn load_from_save(&mut self, save_data: &crate::save_system::SaveData) {
+        self.has_workbench = save_data.has_workbench;
+        self.completed_items = save_data.completed_items.clone();
+        
+        // Restore upgrade counts
+        if let Some(axe_recipe) = self.recipes.iter_mut().find(|r| r.name == "Upgrade Axe") {
+            axe_recipe.upgrade_count = save_data.axe_upgrade_count;
+        }
+        if let Some(pickaxe_recipe) = self.recipes.iter_mut().find(|r| r.name == "Upgrade Pickaxe") {
+            pickaxe_recipe.upgrade_count = save_data.pickaxe_upgrade_count;
+        }
+        
+        // Update unlocked recipes based on workbench status
+        if self.has_workbench {
+            for i in 1..self.unlocked_recipes.len() {
+                self.unlocked_recipes[i] = true;
+            }
         }
     }
 
@@ -129,6 +155,7 @@ impl CraftingManager {
                 // If this is the workbench, unlock workbench-dependent recipes
                 if recipe_index == 0 {
                     self.has_workbench = true;
+                    self.completed_items.push("Workbench".to_string());
                     // Unlock all workbench-dependent recipes
                     for i in 1..self.unlocked_recipes.len() {
                         self.unlocked_recipes[i] = true;

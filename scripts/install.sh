@@ -11,6 +11,13 @@ fi
 INSTALL_DIR="$HOME/.local/bin"
 mkdir -p "$INSTALL_DIR"
 
+# Check for existing installation
+if [ -f "$INSTALL_DIR/keycrafter" ]; then
+    echo "Found existing KeyCrafter installation. Removing..."
+    killall keycrafter 2>/dev/null || true
+    rm -f "$INSTALL_DIR/keycrafter"
+fi
+
 echo "Downloading KeyCrafter..."
 curl -L "https://play.keycrafter.fun/$BINARY" -o "$INSTALL_DIR/keycrafter"
 chmod +x "$INSTALL_DIR/keycrafter"

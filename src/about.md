@@ -14,16 +14,14 @@ Words: Organized by difficulty (easy/medium/hard) with automatic space trimming.
 Progression: Easy words for wood, medium for copper, with space for expansion.
 
 D. Distribution System
-Binary Distribution: Secure SFTP server in Docker container for binary distribution.
-Security Features:
-- SSH key-based authentication only
-- 30-day key rotation
-- Fail2ban protection
-- Restricted SFTP-only access
-- Container isolation with minimal privileges
-- Resource limits and system call restrictions
-- Read-only filesystem
-- Network isolation
+Binary Distribution: Automated installation scripts and direct binary downloads.
+Distribution Features:
+- One-line installation commands for all platforms
+- Automatic OS detection and binary selection
+- PATH management for easy access
+- GitHub releases for manual downloads
+- Cross-platform support (Windows, Linux, Mac)
+- Cloudflare-powered CDN for fast downloads
 
 2. File Responsibilities
 File	Purpose/Responsibility
@@ -34,10 +32,9 @@ islands.rs	Island, resource pool, and node spawning logic
 pathfinding.rs	A* pathfinding implementation and grid/position logic
 resource_types.rs	Shared ResourceType enum and resource-related helpers
 word_lists.rs	Word management and difficulty levels
-Dockerfile	Container configuration for binary distribution
-security-policy.json	Seccomp security policy for container
-docker-compose.yml	Container orchestration and security settings
-setup_keys.sh	SSH key generation and rotation
+nginx/nginx.conf	Web server configuration for binary and script distribution
+scripts/install.ps1	PowerShell installation script
+scripts/install.sh	Bash installation script for Linux/Mac
 
 3. Key Structs & Enums
 Game (main.rs): Central game state (player, resources, islands, etc.)
@@ -57,10 +54,10 @@ WordList, WordDifficulty (word_lists.rs): Word management and difficulty levels
 - ASCII art resource visualization
 - Floating text feedback
 - Word difficulty progression
-- Secure binary distribution
+- Easy installation across platforms
 
 5. Known Issues / Technical Debt
-- No State Saving: Progress is not persisted between sessions
+- State Saving: Progress is persisted between sessions (auto-save every 30 seconds)
 - Single Island: Only one island currently implemented
 - Planned Features Not Yet Implemented:
   - Crafting System
@@ -72,8 +69,8 @@ WordList, WordDifficulty (word_lists.rs): Word management and difficulty levels
 
 6. Goals & Next Steps
 Short Term:
-- Monitor and maintain distribution system security
-- Implement basic state saving/loading
+- Monitor and improve installation experience
+- Improve state saving/loading (remove debug output)
 - Add error handling for corrupt/missing files
 
 Medium Term:
@@ -87,18 +84,16 @@ Long Term:
 - Enhance typing content variety
 - Improve UI/UX accessibility
 
-7. Security & Distribution
-The game binary is distributed through a hardened Docker container:
-- Secure SFTP access only
-- Key-based authentication
-- Regular key rotation
-- Container isolation
-- Resource limits
-- Network restrictions
-- Filesystem protection
+7. Distribution & Installation
+The game is distributed through multiple channels:
+- One-line installers for easy installation
+- GitHub releases for manual downloads
+- Cloudflare-powered CDN for fast downloads
+- Automatic PATH management
+- Cross-platform support
 
-For detailed security settings, see:
-- Dockerfile: Container configuration
-- security-policy.json: System call restrictions
-- docker-compose.yml: Resource limits and security options
-- setup_keys.sh: Key management
+For detailed installation options, see:
+- README.md: Installation instructions
+- scripts/install.ps1: Windows installer
+- scripts/install.sh: Linux/Mac installer
+- nginx/nginx.conf: Web server configuration

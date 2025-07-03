@@ -1,5 +1,13 @@
 # Create install directory
 $installDir = "$env:LOCALAPPDATA\KeyCrafter"
+
+# Check for existing installation
+if (Test-Path "$installDir\keycrafter.exe") {
+    Write-Host "Found existing KeyCrafter installation. Updating..."
+    Stop-Process -Name "keycrafter" -ErrorAction SilentlyContinue
+    Remove-Item "$installDir\keycrafter.exe" -Force
+}
+
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 Write-Host "Downloading KeyCrafter..."
