@@ -8,6 +8,7 @@ mod crafting;
 mod word_lists;
 mod save_system;
 mod updater;
+mod coastline;
 
 use pathfinding::{Grid, Position};
 use ascii_objects::ResourceObjects;
@@ -19,6 +20,7 @@ use crafting::CraftingManager;
 use word_lists::{WordList, WordDifficulty};
 use save_system::{SaveData, GameStats, SaveManager};
 use updater::{Updater, VersionInfo};
+use coastline::Coastline;
 
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind},
@@ -53,6 +55,7 @@ struct Resource {
     harvests_remaining: u32,
     max_harvests: u32,
     path: Vec<Position>,  // Track path for this resource
+    word_start_time: Option<Instant>,  // Track timing for this specific word
 }
 
 // Using shared ResourceType from resource_types.rs
@@ -96,10 +99,10 @@ struct Game {
     word_list: WordList,
     save_manager: SaveManager,
     stats: GameStats,
-    word_start_time: Option<Instant>,
     show_debug_info: bool,
     updater: Updater,
     pending_update: Option<VersionInfo>,
+    coastline: Coastline,
 }
 
 impl Game {
@@ -146,6 +149,7 @@ impl Game {
                     harvests_remaining: max_harvests,
                     max_harvests,
                     path: Vec::new(),
+                    word_start_time: None,
                 };
                 
                 resources.push(new_resource);
@@ -171,7 +175,7 @@ impl Game {
         let mut crafting = CraftingManager::new();
         crafting.load_from_save(&save_data);
         
-        Self {
+        let mut game = Self {
             player,
             resources,
             last_update: Instant::now(),
@@ -184,11 +188,14 @@ impl Game {
             word_list,
             save_manager,
             stats: save_data.stats,
-            word_start_time: None,
             show_debug_info: false,
             updater: Updater::new(),
             pending_update: None,
-        }
+            coastline: Coastline::new(),
+        };
+        
+        // ... rest of initialization ...
+        game
     }
     
     fn update(&mut self) {
@@ -212,6 +219,8 @@ impl Game {
                 self.pending_update = Some(version_info);
             }
         }
+
+        self.coastline.update();
     }
     
     fn set_player_target(&mut self, target: Position) {
@@ -306,6 +315,7 @@ impl Game {
                 harvests_remaining: max_harvests,
                 max_harvests,
                 path: Vec::new(),
+                word_start_time: None,
             };
             
             // Add the resource and update the grid
@@ -346,14 +356,14 @@ impl Game {
                 // Calculate harvest amount and text
                 let (amount, text, color) = match resource.resource_type {
                     ResourceType::Wood => {
-                        let multiplier = self.upgrades.get_multiplier(&ResourceType::Wood);
+                        let multiplier = self.crafting.get_multiplier(&ResourceType::Wood);
                         let amount = (multiplier as u32).max(1);
                         self.player.wood += amount;
                         self.stats.add_resource_harvested(ResourceType::Wood, amount);
                         (amount, "Wood".to_string(), ResourceType::Wood.get_color())
                     },
                     ResourceType::Copper => {
-                        let multiplier = self.upgrades.get_multiplier(&ResourceType::Copper);
+                        let multiplier = self.crafting.get_multiplier(&ResourceType::Copper);
                         let amount = (multiplier as u32).max(1);
                         self.player.copper += amount;
                         self.stats.add_resource_harvested(ResourceType::Copper, amount);
@@ -427,6 +437,7 @@ impl Game {
                                     harvests_remaining: max_harvests,
                                     max_harvests,
                                     path: Vec::new(),
+                                    word_start_time: None,
                                 };
                                 
                                 self.resources.push(new_resource);
@@ -441,7 +452,7 @@ impl Game {
         }
     }
     
-    fn handle_key(&mut self, key: KeyEvent) {
+    fn handle_key(&mut self, key: KeyEvent) -> Option<VersionInfo> {
         // Stop showing debug info after first key press
         self.show_debug_info = false;
 
@@ -455,19 +466,26 @@ impl Game {
                         Ok(new_exe_path) => {
                             if let Err(e) = self.updater.apply_update(&new_exe_path) {
                                 eprintln!("Failed to apply update: {}", e);
+                            } else {
+                                // Signal that we want to exit for update
+                                return Some(version_info);
                             }
-                            std::process::exit(0);
                         }
                         Err(e) => eprintln!("Failed to download update: {}", e),
                     }
                 }
             }
             KeyCode::Char(c) => {
-                // First try to handle crafting input
+                // Handle crafting input - check all recipes simultaneously
+                let mut crafting_completed = false;
+                let mut completed_recipe_idx = None;
+                let mut any_crafting_progress = false;
+                
                 for recipe_idx in 0..self.crafting.get_recipes().len() {
                     if self.crafting.is_recipe_unlocked(recipe_idx) && 
                        self.crafting.can_craft(recipe_idx, self.player.wood, self.player.copper) {
                         if self.crafting.handle_input(recipe_idx, c) {
+                            any_crafting_progress = true;
                             // Check if crafting is complete
                             if let Some((recipe, costs)) = self.crafting.craft_item(recipe_idx) {
                                 self.stats.add_successful_craft();
@@ -497,13 +515,31 @@ impl Game {
                                         Color::Cyan
                                     );
                                 }
+                                
+                                crafting_completed = true;
+                                completed_recipe_idx = Some(recipe_idx);
                             } else {
                                 // Track crafting attempt (typing in progress)
                                 self.stats.add_crafting_attempt();
                             }
-                            return; // Exit early since we handled crafting input
                         }
                     }
+                }
+
+                // If crafting was completed, clear other recipe inputs and don't process resource gathering
+                if crafting_completed {
+                    // Clear inputs for other recipes to prevent conflicts
+                    for recipe_idx in 0..self.crafting.get_recipes().len() {
+                        if Some(recipe_idx) != completed_recipe_idx {
+                            self.crafting.clear_input(recipe_idx);
+                        }
+                    }
+                    return None;
+                }
+
+                // If any crafting input was in progress, don't process resource gathering
+                if any_crafting_progress {
+                    return None;
                 }
 
                 // If not crafting, handle resource gathering input
@@ -538,7 +574,7 @@ impl Game {
                         if expected == Some(c) {
                             // Start this word
                             resource.current_input.push(c);
-                            self.word_start_time = Some(Instant::now());
+                            resource.word_start_time = Some(Instant::now());
                             
                             // Calculate initial path
                             let target_pos = if let Some(obj) = match resource.resource_type {
@@ -596,11 +632,11 @@ impl Game {
                                 word_completed = true;
                                 
                                 // Track word completion stats
-                                if let Some(start_time) = self.word_start_time {
+                                if let Some(start_time) = resource.word_start_time {
                                     let time_taken = start_time.elapsed().as_secs_f32();
                                     self.stats.add_word_completed(target_word.len() as u32, time_taken);
                                 }
-                                self.word_start_time = None;
+                                resource.word_start_time = None;
                                 
                                 // Get the target position
                                 let target_pos = if let Some(obj) = match resource.resource_type {
@@ -621,7 +657,7 @@ impl Game {
                         } else {
                             // Wrong letter, clear this word
                             self.stats.add_mistake();
-                            self.word_start_time = None;
+                            resource.word_start_time = None;
                             resource.current_input.clear();
                             resource.path.clear();
                         }
@@ -648,6 +684,7 @@ impl Game {
             }
             _ => {} // Ignore other key events
         }
+        None
     }
 
     fn render_game_area(&self, f: &mut Frame, game_area: Rect) {
@@ -702,6 +739,14 @@ impl Game {
                     line_spans.push(Span::raw(" "));
                     continue;
                 }
+                
+                // Get the coastline/water tile first
+                let (coast_char, coast_style) = self.coastline.get_tile(
+                    x as i32, 
+                    y as i32, 
+                    game_area.width as i32,
+                    game_area.height as i32
+                );
                 
                 // Check if player is here
                 let span = if pos == self.player.position {
@@ -770,7 +815,7 @@ impl Game {
                             }
                         }
                         
-                        word_span.unwrap_or_else(|| Span::raw(" "))
+                        word_span.unwrap_or_else(|| Span::styled(coast_char, coast_style))
                     }
                 };
                 line_spans.push(span);
@@ -884,11 +929,25 @@ impl Game {
         for (idx, recipe) in recipes.iter().enumerate() {
             if self.crafting.is_recipe_unlocked(idx) {
                 // Recipe name and description
-                crafting_text.push(Line::from(vec![
+                let mut name_spans = vec![
                     Span::styled(&recipe.name, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
                     Span::raw(" - "),
                     Span::raw(&recipe.description)
-                ]));
+                ];
+                
+                // Add upgrade level if this is an upgrade recipe
+                if recipe.name.starts_with("Upgrade") {
+                    if recipe.upgrade_count > 0 {
+                        name_spans.push(Span::raw(" ("));
+                        name_spans.push(Span::styled(
+                            format!("Level {}", recipe.upgrade_count + 1),
+                            Style::default().fg(Color::Yellow)
+                        ));
+                        name_spans.push(Span::raw(")"));
+                    }
+                }
+                
+                crafting_text.push(Line::from(name_spans));
 
                 // Requirements
                 let requirements = self.crafting.get_requirements_text(recipe);
@@ -1060,7 +1119,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     let _ = game.save_game();
                                     break Ok(());
                                 }
-                                _ => game.handle_key(key),
+                                _ => {
+                                    if let Some(_version_info) = game.handle_key(key) {
+                                        // Update was requested, exit cleanly
+                                        break Ok(());
+                                    }
+                                },
                             }
                         }
                     }

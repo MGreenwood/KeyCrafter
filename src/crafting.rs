@@ -149,27 +149,43 @@ impl CraftingManager {
     }
 
     pub fn craft_item(&mut self, recipe_index: usize) -> Option<(Recipe, HashMap<ResourceType, u32>)> {
+        // Get lengths before any mutable borrow
+        let recipes_len = self.recipes.len();
+        let unlocked_len = self.unlocked_recipes.len();
+        let mut crafted_name = None;
+        let mut crafted_idx = None;
+
         if let Some(recipe) = self.recipes.get_mut(recipe_index) {
             // Check if the sentence is fully typed
             if recipe.current_input == recipe.craft_sentence {
+                // Save debug info
+                crafted_name = Some(recipe.name.clone());
+                crafted_idx = Some(recipe_index);
                 // If this is the workbench, unlock workbench-dependent recipes
                 if recipe_index == 0 {
                     self.has_workbench = true;
                     self.completed_items.push("Workbench".to_string());
-                    // Unlock all workbench-dependent recipes
-                    for i in 1..self.unlocked_recipes.len() {
-                        self.unlocked_recipes[i] = true;
+                    // Unlock all workbench-dependent recipes, but only if the vectors are in sync
+                    if unlocked_len == recipes_len {
+                        for i in 1..self.unlocked_recipes.len() {
+                            self.unlocked_recipes[i] = true;
+                        }
+                    } else {
+                        println!("[ERROR] unlocked_recipes and recipes length mismatch: {} vs {}", unlocked_len, recipes_len);
                     }
                 } else {
                     // For upgrades, increment the upgrade count
                     recipe.upgrade_count += 1;
                 }
-                
                 // Clear the input after crafting
                 recipe.current_input.clear();
-                
                 // Return a clone of the recipe and its costs
-                return Some((recipe.clone(), recipe.requirements.clone()));
+                let result = Some((recipe.clone(), recipe.requirements.clone()));
+                // Debug print after crafting (after mutable borrow ends)
+                if let (Some(name), Some(idx)) = (crafted_name, crafted_idx) {
+                    println!("[DEBUG] Crafted {} at index {}", name, idx);
+                }
+                return result;
             }
         }
         None
@@ -179,16 +195,18 @@ impl CraftingManager {
         if let Some(recipe) = self.recipes.get_mut(recipe_index) {
             let target_sentence = &recipe.craft_sentence;
             let current_pos = recipe.current_input.len();
-            
-            if current_pos < target_sentence.len() {
-                if target_sentence.chars().nth(current_pos) == Some(c) {
-                    recipe.current_input.push(c);
-                    true
-                } else {
-                    recipe.current_input.clear();
-                    false
-                }
+
+            // Prevent out-of-bounds access
+            if current_pos >= target_sentence.len() {
+                return false;
+            }
+
+            if target_sentence.chars().nth(current_pos) == Some(c) {
+                recipe.current_input.push(c);
+                true
             } else {
+                // Always clear this recipe's input on wrong letter, but do not block others
+                recipe.current_input.clear();
                 false
             }
         } else {

@@ -99,20 +99,34 @@ impl IslandManager {
         let mut attempts = 0;
         const MAX_ATTEMPTS: u32 = 100;
 
+        // Calculate the safe spawn area (within the land)
+        let center_x = width / 2;
+        let center_y = height / 2;
+        let radius_x = (width * 3 / 5) as f32;
+        let radius_y = (height * 3 / 5) as f32;
+
         while attempts < MAX_ATTEMPTS {
             // Generate random position
             let x = rng.gen_range(4..width-4);  // Leave margin for ASCII art
             let y = rng.gen_range(4..height-4);
 
-            // Check if position is far enough from existing nodes
-            let is_valid = existing_positions.iter().all(|(ex, ey)| {
-                let dx = (x - ex).abs();
-                let dy = (y - ey).abs();
-                dx > 6 || dy > 4  // Minimum distance between nodes
-            });
+            // Check if position is within the land area
+            let dx = (x - center_x) as f32 / radius_x;
+            let dy = (y - center_y) as f32 / radius_y;
+            let distance = (dx * dx + dy * dy).sqrt();
 
-            if is_valid {
-                return Some((x, y));
+            // Only allow spawning within 90% of the land radius to keep away from coast
+            if distance <= 0.9 {
+                // Check if position is far enough from existing nodes
+                let is_valid = existing_positions.iter().all(|(ex, ey)| {
+                    let dx = (x - ex).abs();
+                    let dy = (y - ey).abs();
+                    dx > 6 || dy > 4  // Minimum distance between nodes
+                });
+
+                if is_valid {
+                    return Some((x, y));
+                }
             }
 
             attempts += 1;

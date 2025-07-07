@@ -175,10 +175,13 @@ del "%~f0"
             let batch_path = "update_self.bat";
             fs::write(batch_path, batch_content)?;
             
-            // Start the batch file in a new window and exit immediately
+            // Start the batch file in a completely detached process
             Command::new("cmd")
-                .args(&["/C", "start", "/min", "", batch_path])
+                .args(&["/C", "start", "/min", "/B", "", batch_path])
                 .spawn()?;
+            
+            // Give the batch file a moment to start properly
+            std::thread::sleep(std::time::Duration::from_millis(1000));
         }
 
         #[cfg(not(target_os = "windows"))]

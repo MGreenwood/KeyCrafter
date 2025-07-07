@@ -27,6 +27,7 @@ Distribution Features:
 File	Purpose/Responsibility
 main.rs	Game loop, UI rendering, input handling, main state management (Game, Player, etc.)
 ascii_objects.rs	ASCII art definitions and rendering for resource nodes
+coastline.rs	Coastline rendering with animated waves and land/water visualization
 floating_text.rs	Floating text effect logic and management
 islands.rs	Island, resource pool, and node spawning logic
 pathfinding.rs	A* pathfinding implementation and grid/position logic
@@ -52,6 +53,7 @@ WordList, WordDifficulty (word_lists.rs): Word management and difficulty levels
 - Multi-word simultaneous typing
 - Distance-based harvesting (within 2 moves)
 - ASCII art resource visualization
+- Animated coastline with waves and clean land areas
 - Floating text feedback
 - Word difficulty progression
 - Easy installation across platforms

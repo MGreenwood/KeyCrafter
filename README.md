@@ -55,6 +55,40 @@ If you prefer, you can download the binaries directly from our [GitHub releases]
 - **q** - Quit game
 - **F10** - Quick exit (works anytime)
 
+## Save File Location
+
+- **Installed version (from PATH):**
+  - Save file is stored in your user profile directory (e.g. `%LOCALAPPDATA%\KeyCrafter\keycrafter_save.json` on Windows).
+- **Running from project directory:**
+  - Save file is stored in the current working directory as `keycrafter_save.json`.
+- **Note:** This means your progress is separate depending on how you launch the game.
+
+## Update & Deployment Workflow
+
+- The update process downloads the latest binary from the server and installs it to `%LOCALAPPDATA%\KeyCrafter\keycrafter.exe`.
+- The server always serves the latest build from the project directory via Docker live sync.
+- To update the server binary, rebuild your project (`cargo build --release`) and the new binary will be instantly available to users.
+
+## Troubleshooting
+
+### Update Issues
+- If `keycrafter update` does not update to the latest version:
+  - Make sure you rebuilt your project and the server is serving the new binary.
+  - Use the provided PowerShell script `check_keycrafter_update.ps1` to diagnose sync issues between your build, the server, and your installed version.
+  - Restart your Docker container if the file does not update after a rebuild.
+
+### Save File Issues
+- If your progress is missing, check which version you are running (installed vs. project build) and look for the save file in the appropriate location.
+- The save files are separate for each launch method.
+
+## Diagnostic Script
+
+A PowerShell script `check_keycrafter_update.ps1` is provided to:
+- Show which `keycrafter.exe` is being run from your PATH
+- Show details and hashes for the installed, build, and server binaries
+- Show the version info from the server
+- Compare all three and report if they are identical or different
+
 ## Building from Source
 
 ### Prerequisites
@@ -67,7 +101,7 @@ git clone https://github.com/MGreenwood/KeyCrafter.git
 cd KeyCrafter
 
 # Build and run in one command
-cargo run
+cargo build --release
 
 # Or build a release binary
 cargo build --release
