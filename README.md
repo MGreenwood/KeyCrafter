@@ -42,12 +42,11 @@ If you prefer, you can download the binaries directly from our [GitHub releases]
 
 - **Character**: Blue square (■) that moves around the island
 - **Resources**: 
-  - 🌲 Trees (give wood)
-  - ⛰ Copper Ore (gives copper)
+  -  Trees (give wood)
+  -  Copper Ore (gives copper)
 - **Words**: Random selection covering various keys for typing practice
 - **Movement**: A* pathfinding ensures your character takes the optimal route
-- **Islands**: Currently one island, with plans for multiple islands with different resources
-
+- **Islands**: More resources, maybe some danger?
 ## Controls
 
 - **Type letters** - Select and complete words to harvest resources
