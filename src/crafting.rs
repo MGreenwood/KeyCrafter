@@ -76,6 +76,36 @@ impl CraftingManager {
         });
         manager.unlocked_recipes.push(false);  // Locked until workbench is built
 
+        // Construction: Boat (requires workbench)
+        let mut boat_reqs = HashMap::new();
+        boat_reqs.insert(ResourceType::Wood, 100);
+        boat_reqs.insert(ResourceType::Copper, 30);
+        manager.recipes.push(Recipe {
+            name: "Boat".to_string(),
+            description: "A small craft to cross the sea. Unlocks the next phase.".to_string(),
+            craft_sentence: "I assemble planks, lash them together, and fit copper braces to build a sturdy boat.".to_string(),
+            current_input: String::new(),
+            requirements: boat_reqs,
+            unlocks: vec!["Next Phase".to_string()],
+            upgrade_count: 0,
+        });
+        manager.unlocked_recipes.push(false);  // Locked until workbench is present
+
+        // Locked/Actions: Sail (listed under locked until later)
+        let mut sail_reqs = HashMap::new();
+        sail_reqs.insert(ResourceType::Wood, 10);
+        sail_reqs.insert(ResourceType::Copper, 5);
+        manager.recipes.push(Recipe {
+            name: "Sail".to_string(),
+            description: "Cross the ocean to find other islands".to_string(),
+            craft_sentence: "I set the sails, trim the sheets, and steer the boat into open water.".to_string(),
+            current_input: String::new(),
+            requirements: sail_reqs,
+            unlocks: vec![],
+            upgrade_count: 0,
+        });
+        manager.unlocked_recipes.push(false);  // Remains locked until Boat is built
+
         manager
     }
 
@@ -88,6 +118,13 @@ impl CraftingManager {
     }
 
     pub fn is_recipe_unlocked(&self, index: usize) -> bool {
+        // Hide any recipe that has already been completed (appears in collection)
+        if let Some(recipe) = self.recipes.get(index) {
+            if self.completed_items.iter().any(|it| it == &recipe.name) {
+                return false;
+            }
+        }
+
         if index == 0 {  // Workbench is special
             !self.has_workbench  // Only show if not yet crafted
         } else {
@@ -115,6 +152,18 @@ impl CraftingManager {
         if self.has_workbench {
             for i in 1..self.unlocked_recipes.len() {
                 self.unlocked_recipes[i] = true;
+            }
+        }
+
+        // If save indicates boat was already built, ensure it's in completed_items and unlock Sail
+        if save_data.has_boat {
+            if !self.completed_items.iter().any(|it| it == "Boat") {
+                self.completed_items.push("Boat".to_string());
+            }
+            if let Some(sail_idx) = self.recipes.iter().position(|r| r.name == "Sail") {
+                if sail_idx < self.unlocked_recipes.len() {
+                    self.unlocked_recipes[sail_idx] = true;
+                }
             }
         }
     }
@@ -155,6 +204,13 @@ impl CraftingManager {
         let mut crafted_name = None;
         let mut crafted_idx = None;
 
+        // Precompute positions that we may need to unlock later to avoid borrowing while a mutable borrow exists
+        let sail_pos = self.recipes.iter().position(|r| r.name == "Sail");
+        let mut unlock_sail = false;
+
+        // Result placeholder so we can perform follow-up actions after the mutable borrow ends
+        let mut result: Option<(Recipe, HashMap<ResourceType, u32>)> = None;
+
         if let Some(recipe) = self.recipes.get_mut(recipe_index) {
             // Check if the sentence is fully typed
             if recipe.current_input == recipe.craft_sentence {
@@ -173,22 +229,39 @@ impl CraftingManager {
                     } else {
                         println!("[ERROR] unlocked_recipes and recipes length mismatch: {} vs {}", unlocked_len, recipes_len);
                     }
+                } else if recipe.name == "Boat" {
+                    // Mark one-time construction as completed and add to collection
+                    if !self.completed_items.iter().any(|it| it == "Boat") {
+                        self.completed_items.push("Boat".to_string());
+                    }
+                    // Defer unlocking 'Sail' until after the mutable borrow ends
+                    unlock_sail = true;
                 } else {
                     // For upgrades, increment the upgrade count
                     recipe.upgrade_count += 1;
                 }
                 // Clear the input after crafting
                 recipe.current_input.clear();
-                // Return a clone of the recipe and its costs
-                let result = Some((recipe.clone(), recipe.requirements.clone()));
-                // Debug print after crafting (after mutable borrow ends)
-                if let (Some(name), Some(idx)) = (crafted_name, crafted_idx) {
+                // Capture a clone of the recipe and its costs to return after the mutable borrow
+                result = Some((recipe.clone(), recipe.requirements.clone()));
+
+                // Debug print info available now but don't return yet so we can handle post-borrow actions
+                if let (Some(name), Some(idx)) = (crafted_name.clone(), crafted_idx) {
                     println!("[DEBUG] Crafted {} at index {}", name, idx);
                 }
-                return result;
             }
         }
-        None
+
+        // Post-mutable-borrow actions
+        if unlock_sail {
+            if let Some(idx) = sail_pos {
+                if idx < self.unlocked_recipes.len() {
+                    self.unlocked_recipes[idx] = true;
+                }
+            }
+        }
+
+        result
     }
 
     pub fn handle_input(&mut self, recipe_index: usize, c: char) -> bool {
@@ -257,4 +330,110 @@ impl CraftingManager {
         }
         increased_costs
     }
-} 
+}
+
+// Add questing system to guide players along the upgrade path
+pub struct Quest {
+    pub title: String,
+    pub description: String,
+    pub rewards: HashMap<ResourceType, u32>,
+    pub is_completed: bool,
+}
+
+pub struct QuestManager {
+    quests: Vec<Quest>,
+    current_quest_index: usize,
+}
+
+impl QuestManager {
+    pub fn new() -> Self {
+        let mut quests = Vec::new();
+
+        // Add the first quest: Build a Workbench
+        let mut rewards = HashMap::new();
+        rewards.insert(ResourceType::Wood, 10);
+        rewards.insert(ResourceType::Copper, 5);
+
+        quests.push(Quest {
+            title: "Build a Workbench".to_string(),
+            description: "The first step to crafting greatness.".to_string(),
+            rewards,
+            is_completed: false,
+        });
+
+        Self {
+            quests,
+            current_quest_index: 0,
+        }
+    }
+
+    pub fn get_current_quest(&self) -> Option<&Quest> {
+        self.quests.get(self.current_quest_index)
+    }
+
+    pub fn complete_current_quest(&mut self) -> Option<&Quest> {
+        if let Some(quest) = self.quests.get_mut(self.current_quest_index) {
+            quest.is_completed = true;
+            self.current_quest_index += 1;
+            Some(quest)
+        } else {
+            None
+        }
+    }
+
+    pub fn display_quest(&self) -> String {
+        if let Some(quest) = self.get_current_quest() {
+            let rewards_text: Vec<String> = quest.rewards.iter()
+                .map(|(resource, amount)| format!("+{} {}", amount, resource.get_display_name()))
+                .collect();
+
+            format!("Rewards:\n{}\n\n{}\n{}", rewards_text.join("\n"), quest.title, quest.description)
+        } else {
+            "All quests completed!".to_string()
+        }
+    }
+
+    // Return titles of completed quests for saving
+    pub fn get_completed_quests(&self) -> Vec<String> {
+        self.quests.iter().filter(|q| q.is_completed).map(|q| q.title.clone()).collect()
+    }
+
+    // Mark a quest completed by name (used when loading or backfilling)
+    pub fn mark_quest_completed_by_name(&mut self, name: &str) -> bool {
+        if let Some(idx) = self.quests.iter().position(|q| q.title == name) {
+            self.quests[idx].is_completed = true;
+            // Advance current_quest_index if we're marking the active quest
+            if idx == self.current_quest_index {
+                self.current_quest_index += 1;
+                while self.current_quest_index < self.quests.len() && self.quests[self.current_quest_index].is_completed {
+                    self.current_quest_index += 1;
+                }
+            }
+            return true;
+        }
+        false
+    }
+
+    pub fn is_quest_completed(&self, name: &str) -> bool {
+        self.quests.iter().any(|q| q.title == name && q.is_completed)
+    }
+}
+
+impl CraftingManager {
+    pub fn integrate_questing(&mut self, quest_manager: &mut QuestManager) {
+        if let Some(quest) = quest_manager.get_current_quest() {
+            let quest_title = quest.title.clone(); // Clone the title to avoid borrow conflict
+            let quest_rewards = quest.rewards.clone(); // Clone the rewards to avoid borrow conflict
+            if quest_title == "Build a Workbench" && self.has_workbench {
+                quest_manager.complete_current_quest();
+                println!("Quest Completed: {}", quest_title);
+                for (resource, amount) in &quest_rewards {
+                    println!("Gained: +{} {}", amount, resource.get_display_name());
+                }
+
+                // Ensure quest completion updates the quest display area
+                println!("Quest display updated: {}", quest_manager.display_quest());
+            }
+        }
+    }
+}
