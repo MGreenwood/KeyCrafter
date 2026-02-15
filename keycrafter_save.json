@@ -15,14 +15,14 @@
       "Copper": 146,
       "Wood": 246
     },
-    "total_play_time_seconds": 380681,
-    "session_start_time": 1751859629,
+    "total_play_time_seconds": 19704457,
+    "session_start_time": 1771183405,
     "words_completed": 132,
     "crafting_attempts": 352,
     "successful_crafts": 2,
-    "mistakes_made": 204,
+    "mistakes_made": 206,
     "fastest_word_time": 0.0000296,
     "average_wpm": 0.02092343
   },
-  "save_timestamp": 1751859629
+  "save_timestamp": 1771183405
 }
