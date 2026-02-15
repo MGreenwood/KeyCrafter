@@ -21,6 +21,7 @@ use word_lists::{WordList, WordDifficulty};
 use save_system::{SaveData, GameStats, SaveManager};
 use updater::{Updater, VersionInfo};
 use coastline::Coastline;
+use crafting::QuestManager;
 
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind},
@@ -103,6 +104,7 @@ struct Game {
     updater: Updater,
     pending_update: Option<VersionInfo>,
     coastline: Coastline,
+    quest_manager: QuestManager,
 }
 
 impl Game {
@@ -192,8 +194,20 @@ impl Game {
             updater: Updater::new(),
             pending_update: None,
             coastline: Coastline::new(),
+            quest_manager: QuestManager::new(),
         };
-        
+
+        // Restore saved quest completions so UI/state stays consistent
+        for q in &save_data.completed_quests {
+            game.quest_manager.mark_quest_completed_by_name(q);
+        }
+
+        // If the player already has a workbench (from save) but the Build-a-Workbench quest
+        // is still incomplete, mark that quest complete WITHOUT granting rewards (backfill)
+        if game.crafting.has_workbench && !game.quest_manager.is_quest_completed("Build a Workbench") {
+            game.quest_manager.mark_quest_completed_by_name("Build a Workbench");
+        }
+
         // ... rest of initialization ...
         game
     }
@@ -514,6 +528,30 @@ impl Game {
                                         self.player.position.y as f32 - 2.0,
                                         Color::Cyan
                                     );
+
+                                    // Check and complete the "Build a Workbench" quest (grant rewards)
+                                    if let Some(quest) = self.quest_manager.get_current_quest() {
+                                        let quest_title = quest.title.clone();
+                                        if quest_title == "Build a Workbench" {
+                                            let rewards = quest.rewards.clone();
+                                            // Mark quest complete
+                                            self.quest_manager.complete_current_quest();
+
+                                            // Grant rewards to player and show floating text
+                                            for (res, amt) in &rewards {
+                                                match res {
+                                                    ResourceType::Wood => self.player.wood += *amt,
+                                                    ResourceType::Copper => self.player.copper += *amt,
+                                                }
+                                                self.floating_texts.add_text(
+                                                    format!("+{} {}", amt, res.get_display_name()),
+                                                    self.player.position.x as f32,
+                                                    self.player.position.y as f32 - 3.0,
+                                                    res.get_color()
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                                 
                                 crafting_completed = true;
@@ -697,8 +735,8 @@ impl Game {
                 let pos = Position::new(x as i32, y as i32);
                 
                 // Add resource counter at top-right if we're at the right position
-                if y == 0 && x >= game_area.width.saturating_sub(30) {
-                    if x == game_area.width.saturating_sub(30) {
+                if y == 0 && x >= game_area.width.saturating_sub(40) {
+                    if x == game_area.width.saturating_sub(40) {
                         let wood_text = format!("Wood: {}", self.player.wood);
                         let copper_text = format!("Copper: {}", self.player.copper);
                         line_spans.push(Span::styled(
@@ -716,26 +754,10 @@ impl Game {
                     continue;
                 }
                 
-                // Add completed items display on the right side
-                if x >= game_area.width.saturating_sub(25) {
-                    let right_area_x = x as usize - (game_area.width.saturating_sub(25) as usize);
-                    
-                    // Show completed items (starting from line 2)
-                    let completed_items = self.crafting.get_completed_items();
-                    for (item_idx, item) in completed_items.iter().enumerate() {
-                        let item_line = 2 + item_idx as u16;
-                        if y == item_line && right_area_x < item.len() {
-                            if let Some(c) = item.chars().nth(right_area_x) {
-                                line_spans.push(Span::styled(
-                                    c.to_string(),
-                                    Style::default().fg(Color::Green)
-                                ));
-                                continue;
-                            }
-                        }
-                    }
-                    
-                    // Fill with spaces if nothing to show
+                // Reserve right column for overlays (quest / completed items will be rendered as a Paragraph)
+                const RIGHT_COL_WIDTH: u16 = 40;
+                if x >= game_area.width.saturating_sub(RIGHT_COL_WIDTH) {
+                    // Leave space in the grid here; we'll draw the full right-column UI as a Paragraph later
                     line_spans.push(Span::raw(" "));
                     continue;
                 }
@@ -873,6 +895,51 @@ impl Game {
             }
         }
 
+        // Render right-column quest + completed items as a Paragraph to avoid per-character spacing
+        const RIGHT_COL_WIDTH: u16 = 40;
+        const RIGHT_COL_TOP_OFFSET: u16 = 4; // move quests down so top-right resource counter remains visible
+        if game_area.width > RIGHT_COL_WIDTH + 4 {
+            let right_rect = Rect::new(
+                game_area.x + game_area.width - RIGHT_COL_WIDTH - 1, // inside the border
+                game_area.y + RIGHT_COL_TOP_OFFSET,
+                RIGHT_COL_WIDTH,
+                game_area.height.saturating_sub(RIGHT_COL_TOP_OFFSET + 1),
+            );
+
+            // Build lines for quest + completed items
+            let mut right_lines: Vec<Line> = Vec::new();
+            if let Some(quest) = self.quest_manager.get_current_quest() {
+                // Rewards line
+                let mut reward_spans = Vec::new();
+                for (res, amt) in &quest.rewards {
+                    reward_spans.push(Span::styled(
+                        format!("+{} {}  ", amt, res.get_display_name()),
+                        Style::default().fg(res.get_color()).add_modifier(Modifier::BOLD)
+                    ));
+                }
+                right_lines.push(Line::from(reward_spans));
+
+                // Title and description (wrapped by Paragraph)
+                right_lines.push(Line::from(vec![Span::styled(&quest.title, Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD))]));
+                right_lines.push(Line::from(vec![Span::styled(&quest.description, Style::default().fg(Color::Gray))]));
+                right_lines.push(Line::from(Span::raw("")));
+            }
+
+            // Completed items
+            for item in self.crafting.get_completed_items() {
+                right_lines.push(Line::from(vec![Span::styled(item, Style::default().fg(Color::Green))]));
+            }
+
+            let right_widget = Paragraph::new(right_lines)
+                .block(Block::default())
+                .wrap(Wrap { trim: true });
+
+            f.render_widget(Clear, right_rect);
+            f.render_widget(right_widget, right_rect);
+
+
+        }
+
         // Show update notification if available
         if let Some(version_info) = &self.pending_update {
             let message = self.updater.get_update_message(version_info);
@@ -917,99 +984,115 @@ impl Game {
 
     fn render_crafting_area(&self, f: &mut Frame, area: Rect) {
         let recipes = self.crafting.get_recipes();
-        let mut crafting_text = Vec::new();
 
-        // Title
-        crafting_text.push(Line::from(vec![
+        // Title line at the top of the crafting area
+        let title = Paragraph::new(Line::from(vec![
             Span::styled("Crafting", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-        ]));
-        crafting_text.push(Line::from(""));
+        ]))
+        .block(Block::default())
+        .alignment(Alignment::Left);
+        let title_rect = Rect::new(area.x, area.y, area.width, 1);
+        f.render_widget(title, title_rect);
 
-        // Display each recipe
-        for (idx, recipe) in recipes.iter().enumerate() {
-            if self.crafting.is_recipe_unlocked(idx) {
-                // Recipe name and description
-                let mut name_spans = vec![
-                    Span::styled(&recipe.name, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                    Span::raw(" - "),
-                    Span::raw(&recipe.description)
-                ];
-                
-                // Add upgrade level if this is an upgrade recipe
-                if recipe.name.starts_with("Upgrade") {
-                    if recipe.upgrade_count > 0 {
-                        name_spans.push(Span::raw(" ("));
-                        name_spans.push(Span::styled(
-                            format!("Level {}", recipe.upgrade_count + 1),
-                            Style::default().fg(Color::Yellow)
-                        ));
-                        name_spans.push(Span::raw(")"));
+        // Split the remaining space into three compact columns with small gaps between them
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(30), // left column
+                Constraint::Length(2),      // spacer
+                Constraint::Percentage(36), // middle column (slightly larger)
+                Constraint::Length(2),      // spacer
+                Constraint::Percentage(30), // right column
+            ])
+            .split(Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(1)));
+
+        // Prepare lines for each column
+        let mut left_lines: Vec<Line> = Vec::new();
+        let mut mid_lines: Vec<Line> = Vec::new();
+        let mut right_lines: Vec<Line> = Vec::new();
+
+        // Column headers
+        left_lines.push(Line::from(Span::styled("Tools", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
+        left_lines.push(Line::from(Span::raw("")));
+        mid_lines.push(Line::from(Span::styled("Construction", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
+        mid_lines.push(Line::from(Span::raw("")));
+        // Right column header becomes 'Actions' after Boat is built
+        let right_header = if self.crafting.get_completed_items().iter().any(|it| it == "Boat") {
+            "Actions"
+        } else {
+            "Locked"
+        };
+        right_lines.push(Line::from(Span::styled(right_header, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
+        right_lines.push(Line::from(Span::raw("")));
+
+        // Helper to render the craft sentence in one condensed line (shows typed progress)
+        let render_sentence = |recipe: &crate::crafting::Recipe| -> Line {
+            let mut spans = Vec::new();
+            for (i, c) in recipe.craft_sentence.chars().enumerate() {
+                let style = if i < recipe.current_input.len() {
+                    if c == ' ' {
+                        Style::default().fg(Color::Black).bg(Color::Green)
+                    } else {
+                        Style::default().fg(Color::Green)
                     }
-                }
-                
-                crafting_text.push(Line::from(name_spans));
-
-                // Requirements
-                let requirements = self.crafting.get_requirements_text(recipe);
-                crafting_text.push(Line::from(vec![
-                    Span::styled(format!("Requires: {}", requirements), Style::default().fg(Color::Blue))
-                ]));
-
-                // Crafting progress
-                if !recipe.current_input.is_empty() {
-                    let mut progress_spans = Vec::new();
-                    for (i, c) in recipe.craft_sentence.chars().enumerate() {
-                        let style = if i < recipe.current_input.len() {
-                            if c == ' ' {
-                                // Show spaces as green background with a visible character
-                                Style::default().fg(Color::Black).bg(Color::Green)
-                            } else {
-                                Style::default().fg(Color::Green)
-                            }
-                        } else {
-                            Style::default().fg(Color::Gray)
-                        };
-                        
-                        let display_char = if c == ' ' && i < recipe.current_input.len() {
-                            "▓".to_string() // Use a block character to make the space visible
-                        } else if c == ' ' {
-                            "·".to_string() // Use a middle dot to show untyped spaces
-                        } else {
-                            c.to_string()
-                        };
-                        
-                        progress_spans.push(Span::styled(display_char, style));
-                    }
-                    crafting_text.push(Line::from(progress_spans));
                 } else {
-                    // Show the sentence with visible space indicators
-                    let mut display_spans = Vec::new();
-                    display_spans.push(Span::styled("Type to craft: ", Style::default().fg(Color::Gray)));
-                    
-                    for c in recipe.craft_sentence.chars() {
-                        let display_char = if c == ' ' {
-                            "·".to_string() // Show spaces as middle dots when not started
-                        } else {
-                            c.to_string()
-                        };
-                        display_spans.push(Span::styled(display_char, Style::default().fg(Color::Gray)));
-                    }
-                    
-                    crafting_text.push(Line::from(display_spans));
-                }
+                    Style::default().fg(Color::Gray)
+                };
+                let ch = if c == ' ' { '·' } else { c };
+                spans.push(Span::styled(ch.to_string(), style));
+            }
+            Line::from(spans)
+        };
 
-                // Add a blank line between recipes
-                crafting_text.push(Line::from(""));
+        // Distribute recipes into columns and render each as a compact 2-line tile
+        for (idx, recipe) in recipes.iter().enumerate() {
+            if !self.crafting.is_recipe_unlocked(idx) { continue; }
+
+            let reqs = self.crafting.get_requirements_text(recipe);
+            let mut header_spans = vec![
+                Span::styled(&recipe.name, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::raw("  "),
+                Span::styled(reqs, Style::default().fg(Color::Blue)),
+                Span::raw("  "),
+                Span::raw(&recipe.description),
+            ];
+            if recipe.name.starts_with("Upgrade") && recipe.upgrade_count > 0 {
+                header_spans.push(Span::raw("  "));
+                header_spans.push(Span::styled(format!("(Lvl {})", recipe.upgrade_count + 1), Style::default().fg(Color::Yellow)));
+            }
+
+            let header_line = Line::from(header_spans);
+            let sentence_line = render_sentence(recipe);
+
+            // Decide column by recipe type/name
+            if recipe.name.starts_with("Upgrade") {
+                left_lines.push(header_line);
+                left_lines.push(sentence_line);
+                left_lines.push(Line::from(Span::raw("")));
+            } else if recipe.name == "Workbench" || recipe.name == "Boat" {
+                mid_lines.push(header_line);
+                mid_lines.push(sentence_line);
+                mid_lines.push(Line::from(Span::raw("")));
+            } else {
+                right_lines.push(header_line);
+                right_lines.push(sentence_line);
+                right_lines.push(Line::from(Span::raw("")));
             }
         }
 
-        let crafting_paragraph = Paragraph::new(crafting_text)
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .title("Crafting"))
-            .wrap(Wrap { trim: true });
+        // Ensure each column has at least one placeholder line
+        if left_lines.len() <= 2 { left_lines.push(Line::from(Span::raw("(no tools yet)"))); }
+        if mid_lines.len() <= 2 { mid_lines.push(Line::from(Span::raw("(no structures yet)"))); }
+        if right_lines.len() <= 2 { right_lines.push(Line::from(Span::raw("(locked slots)"))); }
 
-        f.render_widget(crafting_paragraph, area);
+        // Render columns
+        let left_widget = Paragraph::new(left_lines).wrap(Wrap { trim: true });
+        let mid_widget = Paragraph::new(mid_lines).wrap(Wrap { trim: true });
+        let right_widget = Paragraph::new(right_lines).wrap(Wrap { trim: true });
+
+        f.render_widget(left_widget, cols[0]);
+        f.render_widget(mid_widget, cols[2]);
+        f.render_widget(right_widget, cols[4]);
     }
 
     fn get_next_word(&self, resource_type: ResourceType) -> String {
@@ -1051,6 +1134,8 @@ impl Game {
             player_copper: self.player.copper,
             completed_items: self.crafting.get_completed_items().to_vec(),
             has_workbench: self.crafting.has_workbench,
+            has_boat: self.crafting.get_completed_items().iter().any(|it| it == "Boat"),
+            completed_quests: self.quest_manager.get_completed_quests(),
             axe_upgrade_count: self.crafting.get_recipes()
                 .iter()
                 .find(|r| r.name == "Upgrade Axe")
@@ -1171,12 +1256,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn ui(f: &mut Frame, game: &mut Game) {
     let size = f.size();
     
-    // Split screen into game area and crafting area
+    // Split screen into game area and crafting area (reduced game area to give more room to crafting)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(24),  // Game area
-            Constraint::Length(12), // Increased crafting area height
+            Constraint::Min(20),  // Game area (reduced)
+            Constraint::Length(16), // Crafting area increased for more UI space
         ])
         .split(size);
     

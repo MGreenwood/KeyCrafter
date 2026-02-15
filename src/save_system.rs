@@ -48,6 +48,10 @@ pub struct SaveData {
     pub player_copper: u32,
     pub completed_items: Vec<String>,
     pub has_workbench: bool,
+    #[serde(default)]
+    pub has_boat: bool,
+    #[serde(default)]
+    pub completed_quests: Vec<String>,
     pub axe_upgrade_count: u32,
     pub pickaxe_upgrade_count: u32,
     pub stats: GameStats,
@@ -62,6 +66,8 @@ impl Default for SaveData {
             player_copper: 0,
             completed_items: Vec::new(),
             has_workbench: false,
+            has_boat: false,
+            completed_quests: Vec::new(),
             axe_upgrade_count: 0,
             pickaxe_upgrade_count: 0,
             stats: GameStats::default(),
