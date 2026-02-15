@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub enum ResourceType {
     Wood,
     Copper,
+    Iron,
     // Future types can be added here
 }
 
@@ -12,6 +13,7 @@ impl ResourceType {
         match self {
             ResourceType::Wood => (6, 10),        // Trees have more harvests
             ResourceType::Copper => (4, 7),    // Copper has fewer harvests
+            ResourceType::Iron => (3, 5),      // Iron is moderate/rarer
         }
     }
 
@@ -19,6 +21,7 @@ impl ResourceType {
         match self {
             ResourceType::Wood => "Wood",
             ResourceType::Copper => "Copper",
+            ResourceType::Iron => "Iron",
         }
     }
 
@@ -27,6 +30,7 @@ impl ResourceType {
         match self {
             ResourceType::Wood => Color::Green,
             ResourceType::Copper => Color::Yellow,
+            ResourceType::Iron => Color::Gray,
         }
     }
 
@@ -34,6 +38,7 @@ impl ResourceType {
         match self {
             ResourceType::Wood => "/\\",  // Tree symbol
             ResourceType::Copper => "Cu",  // Copper symbol
+            ResourceType::Iron => "Fe",    // Iron symbol
         }
     }
 } 

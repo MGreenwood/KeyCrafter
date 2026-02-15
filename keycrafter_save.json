@@ -7,10 +7,6 @@
     "Boat"
   ],
   "has_workbench": true,
-  "has_boat": true,
-  "completed_quests": [
-    "Build a Workbench"
-  ],
   "axe_upgrade_count": 2,
   "pickaxe_upgrade_count": 0,
   "stats": {
@@ -20,8 +16,8 @@
       "Wood": 273,
       "Copper": 150
     },
-    "total_play_time_seconds": 19716861,
-    "session_start_time": 1771195809,
+    "total_play_time_seconds": 19719567,
+    "session_start_time": 1771198515,
     "words_completed": 148,
     "crafting_attempts": 1141,
     "successful_crafts": 7,
@@ -29,5 +25,5 @@
     "fastest_word_time": 0.0000296,
     "average_wpm": 0.00045039572
   },
-  "save_timestamp": 1771195809
+  "save_timestamp": 1771198515
 }

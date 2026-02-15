@@ -67,6 +67,7 @@ struct Player {
     target: Option<Position>,
     wood: u32,
     copper: u32,
+    iron: u32,
 }
 
 impl Player {
@@ -77,6 +78,7 @@ impl Player {
             target: None,
             wood: 0,
             copper: 0,
+            iron: 0,
         }
     }
     
@@ -134,6 +136,7 @@ impl Game {
                 let difficulty = match resource_type {
                     ResourceType::Wood => WordDifficulty::Easy,
                     ResourceType::Copper => WordDifficulty::Medium,
+                    ResourceType::Iron => WordDifficulty::Medium,
                 };
                 
                 let (min_harvests, max_harvests) = resource_type.get_base_harvests();
@@ -169,6 +172,7 @@ impl Game {
         // Load saved data
         player.wood = save_data.player_wood;
         player.copper = save_data.player_copper;
+        player.iron = save_data.player_iron;
         
         // Debug output to help track loads
         // println!("Loaded: Wood={}, Copper={}", player.wood, player.copper);
@@ -312,6 +316,7 @@ impl Game {
             let difficulty = match resource_type {
                 ResourceType::Wood => WordDifficulty::Easy,
                 ResourceType::Copper => WordDifficulty::Medium,
+                ResourceType::Iron => WordDifficulty::Medium,
             };
             
             let (min_harvests, max_harvests) = resource_type.get_base_harvests();
@@ -382,6 +387,13 @@ impl Game {
                         self.player.copper += amount;
                         self.stats.add_resource_harvested(ResourceType::Copper, amount);
                         (amount, "Copper".to_string(), ResourceType::Copper.get_color())
+                    },
+                    ResourceType::Iron => {
+                        let multiplier = self.crafting.get_multiplier(&ResourceType::Iron);
+                        let amount = (multiplier as u32).max(1);
+                        self.player.iron += amount;
+                        self.stats.add_resource_harvested(ResourceType::Iron, amount);
+                        (amount, "Iron".to_string(), ResourceType::Iron.get_color())
                     },
                 };
                 harvest_idx = Some(idx);
@@ -509,6 +521,7 @@ impl Game {
                                     match resource_type {
                                         ResourceType::Wood => self.player.wood -= amount,
                                         ResourceType::Copper => self.player.copper -= amount,
+                                        ResourceType::Iron => self.player.iron -= amount,
                                     }
                                 }
 
@@ -542,6 +555,7 @@ impl Game {
                                                 match res {
                                                     ResourceType::Wood => self.player.wood += *amt,
                                                     ResourceType::Copper => self.player.copper += *amt,
+                                                    ResourceType::Iron => self.player.iron += *amt,
                                                 }
                                                 self.floating_texts.add_text(
                                                     format!("+{} {}", amt, res.get_display_name()),
@@ -591,6 +605,7 @@ impl Game {
                     let obj = match resource.resource_type {
                         ResourceType::Wood => self.resource_objects.get("tree"),
                         ResourceType::Copper => self.resource_objects.get("copper"),
+                        ResourceType::Iron => self.resource_objects.get("iron"),
                     };
                     
                     if let Some(obj) = obj {
@@ -618,6 +633,7 @@ impl Game {
                             let target_pos = if let Some(obj) = match resource.resource_type {
                                 ResourceType::Wood => self.resource_objects.get("tree"),
                                 ResourceType::Copper => self.resource_objects.get("copper"),
+                                ResourceType::Iron => self.resource_objects.get("iron"),
                             } {
                                 let (x, y) = obj.get_path_point(resource.position.x as usize, resource.position.y as usize);
                                 Position::new(x as i32, y as i32)
@@ -680,6 +696,7 @@ impl Game {
                                 let target_pos = if let Some(obj) = match resource.resource_type {
                                     ResourceType::Wood => self.resource_objects.get("tree"),
                                     ResourceType::Copper => self.resource_objects.get("copper"),
+                                    ResourceType::Iron => self.resource_objects.get("iron"),
                                 } {
                                     let (x, y) = obj.get_path_point(resource.position.x as usize, resource.position.y as usize);
                                     Position::new(x as i32, y as i32)
@@ -739,6 +756,7 @@ impl Game {
                     if x == game_area.width.saturating_sub(40) {
                         let wood_text = format!("Wood: {}", self.player.wood);
                         let copper_text = format!("Copper: {}", self.player.copper);
+                        let iron_text = format!("Iron: {}", self.player.iron);
                         line_spans.push(Span::styled(
                             wood_text,
                             Style::default().fg(ResourceType::Wood.get_color())
@@ -747,6 +765,11 @@ impl Game {
                         line_spans.push(Span::styled(
                             copper_text,
                             Style::default().fg(ResourceType::Copper.get_color())
+                        ));
+                        line_spans.push(Span::raw(" | "));
+                        line_spans.push(Span::styled(
+                            iron_text,
+                            Style::default().fg(ResourceType::Iron.get_color())
                         ));
                         // Skip the rest of this line
                         break;
@@ -780,6 +803,7 @@ impl Game {
                         let obj = match resource.resource_type {
                             ResourceType::Wood => self.resource_objects.get("tree"),
                             ResourceType::Copper => self.resource_objects.get("copper"),
+                            ResourceType::Iron => self.resource_objects.get("iron"),
                         };
                         
                         if let Some(obj) = obj {
@@ -968,7 +992,7 @@ impl Game {
 
         // Show debug info at the bottom if enabled
         if self.show_debug_info {
-            let debug_text = format!("Loaded: Wood={}, Copper={}", self.player.wood, self.player.copper);
+            let debug_text = format!("Loaded: Wood={}, Copper={}, Iron={}", self.player.wood, self.player.copper, self.player.iron);
             let debug_pos = Rect::new(
                 game_area.x + 1,
                 game_area.y + game_area.height - 2,
@@ -1123,7 +1147,7 @@ impl Game {
         self.stats.update_session_time();
 
         // Validate that we have reasonable data before saving
-        if self.player.wood > 1000 || self.player.copper > 1000 {
+        if self.player.wood > 1000 || self.player.copper > 1000 || self.player.iron > 1000 {
             // eprintln!("Warning: Unusual resource amounts detected, skipping save");
             return Ok(());
         }
@@ -1132,6 +1156,7 @@ impl Game {
             version: 1,
             player_wood: self.player.wood,
             player_copper: self.player.copper,
+            player_iron: self.player.iron,
             completed_items: self.crafting.get_completed_items().to_vec(),
             has_workbench: self.crafting.has_workbench,
             has_boat: self.crafting.get_completed_items().iter().any(|it| it == "Boat"),

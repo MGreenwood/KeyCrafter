@@ -33,6 +33,7 @@ impl UpgradeManager {
         // Initialize base multipliers
         manager.resource_multipliers.insert(ResourceType::Wood, 1.0);
         manager.resource_multipliers.insert(ResourceType::Copper, 1.0);
+        manager.resource_multipliers.insert(ResourceType::Iron, 1.0);
 
         // Add initial upgrades
         manager.upgrades.push(Upgrade {
@@ -70,6 +71,7 @@ impl UpgradeManager {
             match upgrade.cost_type {
                 ResourceType::Wood => wood >= cost,
                 ResourceType::Copper => copper >= cost,
+                _ => false,
             }
         } else {
             false
@@ -114,6 +116,7 @@ impl UpgradeManager {
         match resource_type {
             ResourceType::Wood => format!("{} Wood", amount),
             ResourceType::Copper => format!("{} Copper", amount),
+            ResourceType::Iron => format!("{} Iron", amount),
         }
     }
 } 

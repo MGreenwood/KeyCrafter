@@ -312,6 +312,10 @@ impl CraftingManager {
                     1.0
                 }
             },
+            ResourceType::Iron => {
+                // No iron-specific upgrades yet — default multiplier
+                1.0
+            },
         }
     }
 

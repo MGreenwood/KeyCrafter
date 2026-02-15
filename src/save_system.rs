@@ -46,6 +46,8 @@ pub struct SaveData {
     pub version: u32,
     pub player_wood: u32,
     pub player_copper: u32,
+    #[serde(default)]
+    pub player_iron: u32,
     pub completed_items: Vec<String>,
     pub has_workbench: bool,
     #[serde(default)]
@@ -64,6 +66,7 @@ impl Default for SaveData {
             version: 1,
             player_wood: 0,
             player_copper: 0,
+            player_iron: 0,
             completed_items: Vec::new(),
             has_workbench: false,
             has_boat: false,
@@ -112,7 +115,8 @@ impl SaveManager {
                 if let Ok(existing_data) = serde_json::from_str::<SaveData>(&existing_save) {
                     // Only backup if the existing save has more resources
                     if existing_data.player_wood > save_data.player_wood || 
-                       existing_data.player_copper > save_data.player_copper {
+                       existing_data.player_copper > save_data.player_copper ||
+                       existing_data.player_iron > save_data.player_iron {
                         fs::write(&self.backup_file_path, existing_save)?;
                         // println!("Created backup of save with more resources");
                     }
@@ -155,7 +159,8 @@ impl SaveManager {
                     // Use backup if it has more resources
                     let backup_data: SaveData = backup_data;
                     if backup_data.player_wood > save_data.player_wood || 
-                       backup_data.player_copper > save_data.player_copper {
+                       backup_data.player_copper > save_data.player_copper ||
+                       backup_data.player_iron > save_data.player_iron {
                         // println!("Loaded backup save with more resources");
                         save_data = backup_data;
                     }

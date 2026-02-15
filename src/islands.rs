@@ -45,18 +45,18 @@ impl IslandManager {
         });
 
         // Future islands can be added here
-        // Example:
-        // manager.islands.push(Island {
-        //     name: "Iron Mountains".to_string(),
-        //     resource_pools: vec![
-        //         ResourcePool { resource_type: ResourceType::Iron, weight: 50 },
-        //         ResourcePool { resource_type: ResourceType::Copper, weight: 30 },
-        //         ResourcePool { resource_type: ResourceType::Wood, weight: 20 },
-        //     ],
-        //     max_nodes: 6,
-        //     spawn_chance: 0.4,
-        //     level_requirement: 5,
-        // });
+        // Iron Mountains — added
+        manager.islands.push(Island {
+            name: "Iron Mountains".to_string(),
+            resource_pools: vec![
+                ResourcePool { resource_type: ResourceType::Iron, weight: 50 },
+                ResourcePool { resource_type: ResourceType::Copper, weight: 30 },
+                ResourcePool { resource_type: ResourceType::Wood, weight: 20 },
+            ],
+            max_nodes: 6,
+            spawn_chance: 0.4,
+            level_requirement: 5,
+        });
 
         manager
     }
