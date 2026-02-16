@@ -1201,12 +1201,20 @@ impl Game {
         let right_art = [" /\\ ", "(Fe)", "\\__/"];
 
         // Precompute names and lengths so labels only appear on the middle row
-        let left_name = self.island_manager.get_island_name(0).unwrap_or_else(|| "Tutorial Island".to_string());
-        let left_label_len = left_name.len();
-        let right_name = self.island_manager.get_island_name(1).unwrap_or_else(|| "Iron Mountains".to_string());
+        let mut left_name = self.island_manager.get_island_name(0).unwrap_or_else(|| "Tutorial Island".to_string());
+        let mut right_name = self.island_manager.get_island_name(1).unwrap_or_else(|| "Iron Mountains".to_string());
         let right_level = self.island_manager.get_island_level_requirement(1).unwrap_or(5);
-        let right_label = format!("{} (Lvl {})", right_name, right_level);
+        let mut right_label = format!("{} (Lvl {})", right_name, right_level);
+
+        // Truncate labels if the panel is narrow
+        let max_label = (w as usize).saturating_sub(24).max(8);
+        if left_name.len() > max_label { left_name = format!("{}...", &left_name[..max_label.saturating_sub(3)]); }
+        if right_label.len() > max_label { right_label = format!("{}...", &right_label[..max_label.saturating_sub(3)]); }
+
+        let left_label_len = left_name.len();
         let right_label_len = right_label.len();
+        let left_art_w = 4usize; // " /\\ " width
+        let right_art_w = 4usize; // " /\\ " or "(Fe)" width
 
         for row in 0..3 {
             let mut spans = Vec::new();
@@ -1223,28 +1231,40 @@ impl Game {
                 Style::default().fg(ResourceType::Iron.get_color())
             };
 
-            // Left island art
+            // Build line by placing pieces at explicit columns so wrapping/duplication can't occur
+            // Left art
             spans.push(Span::styled(left_art[row], left_style));
             spans.push(Span::raw("  "));
 
-            // Show label only on middle row; otherwise add same-width padding to preserve alignment
+            // Left label only on middle row
             if row == 1 {
                 spans.push(Span::styled(left_name.clone(), left_style));
             } else {
                 spans.push(Span::raw(" ".repeat(left_label_len)));
             }
 
-            // Flexible padding to place the right island near the middle/right
-            let left_len = 4 + 2 + left_label_len; // art + spacer + label
-            let padding = w as usize; // default pad to full width
-            let gap = padding.saturating_sub(left_len + 20); // reserve ~20 chars for right island
-            spans.push(Span::raw(" ".repeat(gap)));
+            // compute where to place the right island so it fits within width
+            let current_len = left_art_w + 2 + left_label_len; // characters so far
+            let right_start = if (right_art_w + 2 + right_label_len + current_len) < (w as usize) {
+                // push spaces to move right island near the right edge
+                (w as usize).saturating_sub(right_art_w + 2 + right_label_len + 1)
+            } else {
+                // fallback: place it after the left label (no overlap)
+                current_len + 2
+            };
 
-            // Right island art
+            // Add spacing up to right_start
+            let mut acc_len = current_len;
+            if right_start > acc_len {
+                spans.push(Span::raw(" ".repeat(right_start - acc_len)));
+                acc_len = right_start;
+            }
+
+            // Right art
             spans.push(Span::styled(right_art[row], right_style));
             spans.push(Span::raw("  "));
 
-            // Show right label only on middle row
+            // Right label only on middle row
             if row == 1 {
                 spans.push(Span::styled(right_label.clone(), right_style));
             } else {
