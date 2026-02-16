@@ -98,7 +98,7 @@ impl CraftingManager {
         manager.recipes.push(Recipe {
             name: "Sail".to_string(),
             description: "Cross the ocean to find other islands".to_string(),
-            craft_sentence: "I set the sails and steer the boat into open water.".to_string(),
+            craft_sentence: "I set the sails.".to_string(), // + " and steer the boat into open water.",
             current_input: String::new(),
             requirements: sail_reqs,
             unlocks: vec![],

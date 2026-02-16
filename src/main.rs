@@ -1245,12 +1245,19 @@ impl Game {
 
             // compute where to place the right island so it fits within width
             let current_len = left_art_w + 2 + left_label_len; // characters so far
-            let right_start = if (right_art_w + 2 + right_label_len + current_len) < (w as usize) {
-                // push spaces to move right island near the right edge
+            // shift right-island left by N columns (keeps it from hugging the far-right)
+            let desired_left_shift = 15usize;
+            let right_edge_start = if (right_art_w + 2 + right_label_len + current_len) < (w as usize) {
                 (w as usize).saturating_sub(right_art_w + 2 + right_label_len + 1)
             } else {
-                // fallback: place it after the left label (no overlap)
                 current_len + 2
+            };
+            let right_start = if right_edge_start > desired_left_shift {
+                let shifted = right_edge_start.saturating_sub(desired_left_shift);
+                // ensure we never overlap the left block
+                std::cmp::max(shifted, current_len + 2)
+            } else {
+                std::cmp::max(right_edge_start, current_len + 2)
             };
 
             // Add spacing up to right_start
