@@ -232,6 +232,14 @@ impl Game {
             // Update floating texts
             self.floating_texts.update();
 
+            // Ensure island cursor is valid (defensive)
+            let island_count = self.island_manager.island_count();
+            if island_count == 0 {
+                self.island_map_cursor = 0;
+            } else if self.island_map_cursor >= island_count {
+                self.island_map_cursor = self.island_manager.get_current_island_index().min(island_count.saturating_sub(1));
+            }
+
             // Animate island-map panel (simple linear progress)
             const MAP_STEP: f32 = 0.12; // ~8-9 frames to fully open/close
             if self.show_island_map && self.island_map_progress < 1.0 {
@@ -516,6 +524,18 @@ impl Game {
                 }
                 KeyCode::Char(' ') | KeyCode::Enter => {
                     let idx = self.island_map_cursor;
+
+                    // Defensive: validate idx
+                    let island_count = self.island_manager.island_count();
+                    if island_count == 0 || idx >= island_count {
+                        self.floating_texts.add_text(
+                            "Invalid island selection.".to_string(),
+                            40.0,
+                            6.0,
+                            Color::Red,
+                        );
+                        return None;
+                    }
 
                     // Already on this island?
                     if idx == self.island_manager.get_current_island_index() {
@@ -1284,8 +1304,8 @@ impl Game {
         // Legend / hint
         lines.push(Line::from(vec![
             Span::raw(" "),
-            Span::styled("Craft 'Sail' to open map  ", Style::default().fg(Color::Gray)),
-            Span::raw("   [m] Close map  · Use the islands to travel when you have a boat.")
+            Span::styled("<Tab> to switch islands, [Space] to select", Style::default().fg(Color::Gray)),
+            Span::raw("   [m] Close map")
         ]));
 
         // Bottom animated wave with a little ship
