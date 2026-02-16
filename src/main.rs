@@ -232,14 +232,6 @@ impl Game {
             // Update floating texts
             self.floating_texts.update();
 
-            // Ensure island cursor is valid (defensive)
-            let island_count = self.island_manager.island_count();
-            if island_count == 0 {
-                self.island_map_cursor = 0;
-            } else if self.island_map_cursor >= island_count {
-                self.island_map_cursor = self.island_manager.get_current_island_index().min(island_count.saturating_sub(1));
-            }
-
             // Animate island-map panel (simple linear progress)
             const MAP_STEP: f32 = 0.12; // ~8-9 frames to fully open/close
             if self.show_island_map && self.island_map_progress < 1.0 {
@@ -525,18 +517,6 @@ impl Game {
                 KeyCode::Char(' ') | KeyCode::Enter => {
                     let idx = self.island_map_cursor;
 
-                    // Defensive: validate idx
-                    let island_count = self.island_manager.island_count();
-                    if island_count == 0 || idx >= island_count {
-                        self.floating_texts.add_text(
-                            "Invalid island selection.".to_string(),
-                            40.0,
-                            6.0,
-                            Color::Red,
-                        );
-                        return None;
-                    }
-
                     // Already on this island?
                     if idx == self.island_manager.get_current_island_index() {
                         self.floating_texts.add_text(
@@ -663,30 +643,98 @@ impl Game {
                 let mut any_crafting_progress = false;
                 
                 for recipe_idx in 0..self.crafting.get_recipes().len() {
-                    if self.crafting.is_recipe_unlocked(recipe_idx) && 
-                       self.crafting.can_craft(recipe_idx, self.player.wood, self.player.copper) {
+                    // Allow typing the craft sentence for any unlocked recipe (even if resources are missing)
+                    if self.crafting.is_recipe_unlocked(recipe_idx) {
                         if self.crafting.handle_input(recipe_idx, c) {
                             any_crafting_progress = true;
-                            // Check if crafting is complete
-                            if let Some((recipe, costs)) = self.crafting.craft_item(recipe_idx) {
-                                self.stats.add_successful_craft();
-                                
-                                // Deduct resources
-                                for (resource_type, amount) in costs {
-                                    match resource_type {
-                                        ResourceType::Wood => self.player.wood -= amount,
-                                        ResourceType::Copper => self.player.copper -= amount,
-                                        ResourceType::Iron => self.player.iron -= amount,
-                                    }
-                                }
 
-                                // Show crafting success message
-                                self.floating_texts.add_text(
-                                    format!("Crafted {}!", recipe.name),
-                                    self.player.position.x as f32,
-                                    self.player.position.y as f32 - 1.0,
-                                    Color::Yellow
-                                );
+                            // If the sentence is fully typed, attempt to craft only when resources are available
+                            let recipe_ref = &self.crafting.get_recipes()[recipe_idx];
+                            if recipe_ref.current_input == recipe_ref.craft_sentence {
+                                if self.crafting.can_craft(recipe_idx, self.player.wood, self.player.copper) {
+                                    if let Some((recipe, costs)) = self.crafting.craft_item(recipe_idx) {
+                                        self.stats.add_successful_craft();
+
+                                        // Deduct resources
+                                        for (resource_type, amount) in costs {
+                                            match resource_type {
+                                                ResourceType::Wood => self.player.wood -= amount,
+                                                ResourceType::Copper => self.player.copper -= amount,
+                                                ResourceType::Iron => self.player.iron -= amount,
+                                            }
+                                        }
+
+                                        // Show crafting success message
+                                        self.floating_texts.add_text(
+                                            format!("Crafted {}!", recipe.name),
+                                            self.player.position.x as f32,
+                                            self.player.position.y as f32 - 1.0,
+                                            Color::Yellow
+                                        );
+
+                                        // If this was the workbench, show unlock message
+                                        if recipe_idx == 0 {
+                                            self.floating_texts.add_text(
+                                                "New recipes unlocked!".to_string(),
+                                                self.player.position.x as f32,
+                                                self.player.position.y as f32 - 2.0,
+                                                Color::Cyan
+                                            );
+
+                                            // Check and complete the "Build a Workbench" quest (grant rewards)
+                                            if let Some(quest) = self.quest_manager.get_current_quest() {
+                                                let quest_title = quest.title.clone();
+                                                if quest_title == "Build a Workbench" {
+                                                    let rewards = quest.rewards.clone();
+                                                    // Mark quest complete
+                                                    self.quest_manager.complete_current_quest();
+
+                                                    // Grant rewards to player and show floating text
+                                                    for (res, amt) in &rewards {
+                                                        match res {
+                                                            ResourceType::Wood => self.player.wood += *amt,
+                                                            ResourceType::Copper => self.player.copper += *amt,
+                                                            ResourceType::Iron => self.player.iron += *amt,
+                                                        }
+                                                        self.floating_texts.add_text(
+                                                            format!("+{} {}", amt, res.get_display_name()),
+                                                            self.player.position.x as f32,
+                                                            self.player.position.y as f32 - 3.0,
+                                                            res.get_color()
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // If player just crafted the Sail action, open the island map (typing required)
+                                        if recipe.name == "Sail" {
+                                            // Open map immediately — player must type the sail phrase to trigger this
+                                            self.show_island_map = true;
+                                            self.island_map_progress = 0.0;
+                                            self.island_map_cursor = self.island_manager.get_current_island_index();
+
+                                            self.floating_texts.add_text(
+                                                "You set the sails — island map opened!".to_string(),
+                                                self.player.position.x as f32,
+                                                self.player.position.y as f32 - 2.0,
+                                                Color::Cyan
+                                            );
+                                        }
+                                    }
+                                } else {
+                                    // Full sentence typed but missing resources — notify player
+                                    self.floating_texts.add_text(
+                                        "Not enough resources to craft.".to_string(),
+                                        self.player.position.x as f32,
+                                        self.player.position.y as f32 - 1.0,
+                                        Color::Red,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
 
                                 // If this was the workbench, show unlock message
                                 if recipe_idx == 0 {
