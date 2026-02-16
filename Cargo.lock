@@ -581,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "keycrafter"
-version = "0.1.107"
+version = "0.1.109"
 dependencies = [
  "crossterm",
  "pathfinding",

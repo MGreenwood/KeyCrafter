@@ -733,68 +733,6 @@ impl Game {
                                 }
                             }
                         }
-                    }
-                }
-
-                                // If this was the workbench, show unlock message
-                                if recipe_idx == 0 {
-                                    self.floating_texts.add_text(
-                                        "New recipes unlocked!".to_string(),
-                                        self.player.position.x as f32,
-                                        self.player.position.y as f32 - 2.0,
-                                        Color::Cyan
-                                    );
-
-                                    // Check and complete the "Build a Workbench" quest (grant rewards)
-                                    if let Some(quest) = self.quest_manager.get_current_quest() {
-                                        let quest_title = quest.title.clone();
-                                        if quest_title == "Build a Workbench" {
-                                            let rewards = quest.rewards.clone();
-                                            // Mark quest complete
-                                            self.quest_manager.complete_current_quest();
-
-                                            // Grant rewards to player and show floating text
-                                            for (res, amt) in &rewards {
-                                                match res {
-                                                    ResourceType::Wood => self.player.wood += *amt,
-                                                    ResourceType::Copper => self.player.copper += *amt,
-                                                    ResourceType::Iron => self.player.iron += *amt,
-                                                }
-                                                self.floating_texts.add_text(
-                                                    format!("+{} {}", amt, res.get_display_name()),
-                                                    self.player.position.x as f32,
-                                                    self.player.position.y as f32 - 3.0,
-                                                    res.get_color()
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // If player just crafted the Sail action, open the island map (typing required)
-                                if recipe.name == "Sail" {
-                                    // Open map immediately — player must type the sail phrase to trigger this
-                                    self.show_island_map = true;
-                                    self.island_map_progress = 0.0;
-                                    self.island_map_cursor = self.island_manager.get_current_island_index();
-
-                                    self.floating_texts.add_text(
-                                        "You set the sails — island map opened!".to_string(),
-                                        self.player.position.x as f32,
-                                        self.player.position.y as f32 - 2.0,
-                                        Color::Cyan
-                                    );
-                                }
-                                
-                                crafting_completed = true;
-                                completed_recipe_idx = Some(recipe_idx);
-                            } else {
-                                // Track crafting attempt (typing in progress)
-                                self.stats.add_crafting_attempt();
-                            }
-                        }
-                    }
-                }
 
                 // If crafting was completed, clear other recipe inputs and don't process resource gathering
                 if crafting_completed {
