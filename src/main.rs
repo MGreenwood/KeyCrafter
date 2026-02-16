@@ -619,23 +619,6 @@ impl Game {
                 }
             }
 
-            // 'm' does NOT open the map anymore — map opens only when you type the Sail sentence.
-            KeyCode::Char('m') => {
-                if self.show_island_map {
-                    // allow closing with 'm'
-                    self.show_island_map = false;
-                } else {
-                    // guide the player to type Sail instead of using a hotkey
-                    self.floating_texts.add_text(
-                        "You must type the 'Sail' phrase to open the island map.".to_string(),
-                        40.0,
-                        6.0,
-                        Color::Gray,
-                    );
-                }
-                return None;
-            }
-
             KeyCode::Char(c) => {
                 // Handle crafting input - check all recipes simultaneously
                 let mut crafting_completed = false;
@@ -730,9 +713,13 @@ impl Game {
                                         self.player.position.y as f32 - 1.0,
                                         Color::Red,
                                     );
+                                    // Clear the recipe's typed input so the UI doesn't stay highlighted as 'complete'
+                                    self.crafting.clear_input(recipe_idx);
                                 }
                             }
                         }
+                    }
+                }
 
                 // If crafting was completed, clear other recipe inputs and don't process resource gathering
                 if crafting_completed {
@@ -1605,3 +1592,4 @@ fn ui(f: &mut Frame, game: &mut Game) {
     game.render_game_area(f, chunks[0]);
     game.render_crafting_area(f, chunks[1]);
 }
+    
