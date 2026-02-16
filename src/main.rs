@@ -1200,6 +1200,14 @@ impl Game {
         let left_art = [" /\\ ", "/~~\\", " || "];
         let right_art = [" /\\ ", "(Fe)", "\\__/"];
 
+        // Precompute names and lengths so labels only appear on the middle row
+        let left_name = self.island_manager.get_island_name(0).unwrap_or_else(|| "Tutorial Island".to_string());
+        let left_label_len = left_name.len();
+        let right_name = self.island_manager.get_island_name(1).unwrap_or_else(|| "Iron Mountains".to_string());
+        let right_level = self.island_manager.get_island_level_requirement(1).unwrap_or(5);
+        let right_label = format!("{} (Lvl {})", right_name, right_level);
+        let right_label_len = right_label.len();
+
         for row in 0..3 {
             let mut spans = Vec::new();
 
@@ -1215,24 +1223,33 @@ impl Game {
                 Style::default().fg(ResourceType::Iron.get_color())
             };
 
-            // Left island (tutorial/current start)
-            let left_name = self.island_manager.get_island_name(0).unwrap_or_else(|| "Tutorial Island".to_string());
+            // Left island art
             spans.push(Span::styled(left_art[row], left_style));
             spans.push(Span::raw("  "));
-            spans.push(Span::styled(left_name, left_style));
+
+            // Show label only on middle row; otherwise add same-width padding to preserve alignment
+            if row == 1 {
+                spans.push(Span::styled(left_name.clone(), left_style));
+            } else {
+                spans.push(Span::raw(" ".repeat(left_label_len)));
+            }
 
             // Flexible padding to place the right island near the middle/right
-            let left_len = 4 + 2 + "Starter Grove".len();
+            let left_len = 4 + 2 + left_label_len; // art + spacer + label
             let padding = w as usize; // default pad to full width
             let gap = padding.saturating_sub(left_len + 20); // reserve ~20 chars for right island
             spans.push(Span::raw(" ".repeat(gap)));
 
-            // Right island (other)
-            let right_name = self.island_manager.get_island_name(1).unwrap_or_else(|| "Iron Mountains".to_string());
-            let right_level = self.island_manager.get_island_level_requirement(1).unwrap_or(5);
+            // Right island art
             spans.push(Span::styled(right_art[row], right_style));
             spans.push(Span::raw("  "));
-            spans.push(Span::styled(format!("{} (Lvl {})", right_name, right_level), right_style));
+
+            // Show right label only on middle row
+            if row == 1 {
+                spans.push(Span::styled(right_label.clone(), right_style));
+            } else {
+                spans.push(Span::raw(" ".repeat(right_label_len)));
+            }
 
             lines.push(Line::from(spans));
         }
