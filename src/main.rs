@@ -619,14 +619,19 @@ impl Game {
                 }
             }
 
-            // Toggle island map
+            // 'm' does NOT open the map anymore — map opens only when you type the Sail sentence.
             KeyCode::Char('m') => {
-                self.show_island_map = !self.show_island_map;
-                // start animation if opening
                 if self.show_island_map {
-                    self.island_map_progress = 0.0;
-                    // start cursor on current island
-                    self.island_map_cursor = self.island_manager.get_current_island_index();
+                    // allow closing with 'm'
+                    self.show_island_map = false;
+                } else {
+                    // guide the player to type Sail instead of using a hotkey
+                    self.floating_texts.add_text(
+                        "You must type the 'Sail' phrase to open the island map.".to_string(),
+                        40.0,
+                        6.0,
+                        Color::Gray,
+                    );
                 }
                 return None;
             }
@@ -698,10 +703,15 @@ impl Game {
                                     }
                                 }
 
-                                // If player just crafted the Sail action, notify they can open the map (don't auto-open)
+                                // If player just crafted the Sail action, open the island map (typing required)
                                 if recipe.name == "Sail" {
+                                    // Open map immediately — player must type the sail phrase to trigger this
+                                    self.show_island_map = true;
+                                    self.island_map_progress = 0.0;
+                                    self.island_map_cursor = self.island_manager.get_current_island_index();
+
                                     self.floating_texts.add_text(
-                                        "Sails ready — press 'm' to open the island map.".to_string(),
+                                        "You set the sails — island map opened!".to_string(),
                                         self.player.position.x as f32,
                                         self.player.position.y as f32 - 2.0,
                                         Color::Cyan
@@ -1230,8 +1240,8 @@ impl Game {
         // Legend / hint
         lines.push(Line::from(vec![
             Span::raw(" "),
-            Span::styled("[m] Close map  ", Style::default().fg(Color::Gray)),
-            Span::raw("   Use the islands to travel when you have a boat.")
+            Span::styled("Craft 'Sail' to open map  ", Style::default().fg(Color::Gray)),
+            Span::raw("   [m] Close map  · Use the islands to travel when you have a boat.")
         ]));
 
         // Bottom animated wave with a little ship
