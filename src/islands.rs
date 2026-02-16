@@ -26,9 +26,9 @@ impl IslandManager {
             current_island: 0,
         };
 
-        // Starting island - Basic resources
+        // Starting island - Basic resources (tutorial)
         manager.islands.push(Island {
-            name: "Starter Grove".to_string(),
+            name: "Tutorial Island".to_string(),
             resource_pools: vec![
                 ResourcePool {
                     resource_type: ResourceType::Wood,
@@ -45,18 +45,18 @@ impl IslandManager {
         });
 
         // Future islands can be added here
-        // Example:
-        // manager.islands.push(Island {
-        //     name: "Iron Mountains".to_string(),
-        //     resource_pools: vec![
-        //         ResourcePool { resource_type: ResourceType::Iron, weight: 50 },
-        //         ResourcePool { resource_type: ResourceType::Copper, weight: 30 },
-        //         ResourcePool { resource_type: ResourceType::Wood, weight: 20 },
-        //     ],
-        //     max_nodes: 6,
-        //     spawn_chance: 0.4,
-        //     level_requirement: 5,
-        // });
+        // Iron Mountains — added
+        manager.islands.push(Island {
+            name: "Iron Mountains".to_string(),
+            resource_pools: vec![
+                ResourcePool { resource_type: ResourceType::Iron, weight: 50 },
+                ResourcePool { resource_type: ResourceType::Copper, weight: 30 },
+                ResourcePool { resource_type: ResourceType::Wood, weight: 20 },
+            ],
+            max_nodes: 6,
+            spawn_chance: 0.4,
+            level_requirement: 5,
+        });
 
         manager
     }
@@ -133,5 +133,28 @@ impl IslandManager {
         }
 
         None
+    }
+
+    // Public helpers for UI / selection
+    pub fn island_count(&self) -> usize {
+        self.islands.len()
+    }
+
+    pub fn get_island_name(&self, index: usize) -> Option<String> {
+        self.islands.get(index).map(|i| i.name.clone())
+    }
+
+    pub fn get_island_level_requirement(&self, index: usize) -> Option<u32> {
+        self.islands.get(index).map(|i| i.level_requirement)
+    }
+
+    pub fn get_current_island_index(&self) -> usize {
+        self.current_island
+    }
+
+    pub fn set_current_island(&mut self, index: usize) {
+        if index < self.islands.len() {
+            self.current_island = index;
+        }
     }
 } 

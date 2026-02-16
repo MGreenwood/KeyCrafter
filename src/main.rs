@@ -67,6 +67,7 @@ struct Player {
     target: Option<Position>,
     wood: u32,
     copper: u32,
+    iron: u32,
 }
 
 impl Player {
@@ -77,6 +78,7 @@ impl Player {
             target: None,
             wood: 0,
             copper: 0,
+            iron: 0,
         }
     }
     
@@ -101,6 +103,12 @@ struct Game {
     save_manager: SaveManager,
     stats: GameStats,
     show_debug_info: bool,
+
+    // Island map UI
+    show_island_map: bool,
+    island_map_progress: f32, // 0.0 (hidden) .. 1.0 (fully shown)
+    island_map_cursor: usize, // which island is highlighted in the map
+
     updater: Updater,
     pending_update: Option<VersionInfo>,
     coastline: Coastline,
@@ -134,6 +142,7 @@ impl Game {
                 let difficulty = match resource_type {
                     ResourceType::Wood => WordDifficulty::Easy,
                     ResourceType::Copper => WordDifficulty::Medium,
+                    ResourceType::Iron => WordDifficulty::Medium,
                 };
                 
                 let (min_harvests, max_harvests) = resource_type.get_base_harvests();
@@ -169,6 +178,7 @@ impl Game {
         // Load saved data
         player.wood = save_data.player_wood;
         player.copper = save_data.player_copper;
+        player.iron = save_data.player_iron;
         
         // Debug output to help track loads
         // println!("Loaded: Wood={}, Copper={}", player.wood, player.copper);
@@ -191,6 +201,10 @@ impl Game {
             save_manager,
             stats: save_data.stats,
             show_debug_info: false,
+            // Island map defaults
+            show_island_map: false,
+            island_map_progress: 0.0,
+            island_map_cursor: 0,
             updater: Updater::new(),
             pending_update: None,
             coastline: Coastline::new(),
@@ -217,6 +231,15 @@ impl Game {
         if now.duration_since(self.last_update) >= Duration::from_millis(50) {
             // Update floating texts
             self.floating_texts.update();
+
+            // Animate island-map panel (simple linear progress)
+            const MAP_STEP: f32 = 0.12; // ~8-9 frames to fully open/close
+            if self.show_island_map && self.island_map_progress < 1.0 {
+                self.island_map_progress = (self.island_map_progress + MAP_STEP).min(1.0);
+            } else if !self.show_island_map && self.island_map_progress > 0.0 {
+                self.island_map_progress = (self.island_map_progress - MAP_STEP).max(0.0);
+            }
+
             self.last_update = now;
         }
 
@@ -246,6 +269,7 @@ impl Game {
             let obj = match resource.resource_type {
                 ResourceType::Wood => self.resource_objects.get("tree"),
                 ResourceType::Copper => self.resource_objects.get("copper"),
+                ResourceType::Iron => self.resource_objects.get("iron"),
             };
             
             if let Some(obj) = obj {
@@ -312,6 +336,7 @@ impl Game {
             let difficulty = match resource_type {
                 ResourceType::Wood => WordDifficulty::Easy,
                 ResourceType::Copper => WordDifficulty::Medium,
+                ResourceType::Iron => WordDifficulty::Medium,
             };
             
             let (min_harvests, max_harvests) = resource_type.get_base_harvests();
@@ -358,12 +383,13 @@ impl Game {
             let target_pos = if let Some(obj) = match resource.resource_type {
                 ResourceType::Wood => self.resource_objects.get("tree"),
                 ResourceType::Copper => self.resource_objects.get("copper"),
+                ResourceType::Iron => self.resource_objects.get("iron"),
             } {
                 let (x, y) = obj.get_path_point(resource.position.x as usize, resource.position.y as usize);
                 Position::new(x as i32, y as i32)
             } else {
                 resource.position.clone()
-            };
+            }; 
 
             let distance = self.player.position.manhattan_distance(&target_pos);
             if distance <= 2 && resource.current_input == resource.craft_sentence {
@@ -382,6 +408,13 @@ impl Game {
                         self.player.copper += amount;
                         self.stats.add_resource_harvested(ResourceType::Copper, amount);
                         (amount, "Copper".to_string(), ResourceType::Copper.get_color())
+                    },
+                    ResourceType::Iron => {
+                        let multiplier = self.crafting.get_multiplier(&ResourceType::Iron);
+                        let amount = (multiplier as u32).max(1);
+                        self.player.iron += amount;
+                        self.stats.add_resource_harvested(ResourceType::Iron, amount);
+                        (amount, "Iron".to_string(), ResourceType::Iron.get_color())
                     },
                 };
                 harvest_idx = Some(idx);
@@ -434,6 +467,7 @@ impl Game {
                                 let difficulty = match resource_type {
                                     ResourceType::Wood => WordDifficulty::Easy,
                                     ResourceType::Copper => WordDifficulty::Medium,
+                                    ResourceType::Iron => WordDifficulty::Medium,
                                 };
                                 
                                 let (min_harvests, max_harvests) = resource_type.get_base_harvests();
@@ -470,6 +504,101 @@ impl Game {
         // Stop showing debug info after first key press
         self.show_debug_info = false;
 
+        // If the island map is open, handle map-specific keys (Tab to cycle, Space/Enter to select, m to close)
+        if self.island_map_progress > 0.0 {
+            match key.code {
+                KeyCode::Tab => {
+                    let count = self.island_manager.island_count();
+                    if count > 0 {
+                        self.island_map_cursor = (self.island_map_cursor + 1) % count;
+                    }
+                    return None;
+                }
+                KeyCode::Char(' ') | KeyCode::Enter => {
+                    let idx = self.island_map_cursor;
+
+                    // Already on this island?
+                    if idx == self.island_manager.get_current_island_index() {
+                        self.floating_texts.add_text(
+                            "You're already on this island.".to_string(),
+                            40.0,
+                            6.0,
+                            Color::Gray,
+                        );
+                        return None;
+                    }
+
+                    // Need a boat to travel
+                    let has_boat = self.crafting.get_completed_items().iter().any(|it| it == "Boat");
+                    if !has_boat {
+                        self.floating_texts.add_text(
+                            "You need a Boat to travel!".to_string(),
+                            40.0,
+                            6.0,
+                            Color::Red,
+                        );
+                        return None;
+                    }
+
+                    // Perform travel: switch island and respawn nodes
+                    self.island_manager.set_current_island(idx);
+                    let current_island = self.island_manager.get_current_island();
+
+                    // Clear and spawn new resources for the selected island
+                    self.resources.clear();
+                    self.grid.clear_obstacles();
+                    let mut existing_positions: Vec<(i32, i32)> = Vec::new();
+                    let mut rng = rand::thread_rng();
+                    for _ in 0..current_island.max_nodes {
+                        if let Some((x, y)) = self.island_manager.find_spawn_position(&existing_positions, 80, 24) {
+                            existing_positions.push((x, y));
+                            let resource_type = self.island_manager.get_random_resource_type();
+                            let difficulty = match resource_type {
+                                ResourceType::Wood => WordDifficulty::Easy,
+                                ResourceType::Copper => WordDifficulty::Medium,
+                                ResourceType::Iron => WordDifficulty::Medium,
+                            };
+                            let (min_harvests, max_harvests) = resource_type.get_base_harvests();
+                            let max_harvests = rng.gen_range(min_harvests..=max_harvests);
+                            let word = self.word_list.get_random_word(difficulty).to_string();
+                            let next_word = self.word_list.get_random_word(difficulty).to_string();
+                            let new_resource = Resource {
+                                position: Position::new(x, y),
+                                resource_type,
+                                craft_sentence: word,
+                                next_craft_sentence: next_word,
+                                current_input: String::new(),
+                                harvests_remaining: max_harvests,
+                                max_harvests,
+                                path: Vec::new(),
+                                word_start_time: None,
+                            };
+                            self.grid.add_obstacle(new_resource.position.clone());
+                            self.resources.push(new_resource);
+                        }
+                    }
+
+                    // Center player and show confirmation
+                    self.player.position = Position::new(40, 12);
+                    self.floating_texts.add_text(
+                        format!("Sailed to {}!", current_island.name),
+                        40.0,
+                        6.0,
+                        Color::Cyan,
+                    );
+
+                    // Close the map
+                    self.show_island_map = false;
+                    return None;
+                }
+                KeyCode::Char('m') => {
+                    self.show_island_map = false;
+                    return None;
+                }
+                _ => return None,
+            }
+        }
+
         match key.code {
             KeyCode::Char('u') if self.pending_update.is_some() => {
                 // Clone version info before any mutable borrow
@@ -489,6 +618,7 @@ impl Game {
                     }
                 }
             }
+
             KeyCode::Char(c) => {
                 // Handle crafting input - check all recipes simultaneously
                 let mut crafting_completed = false;
@@ -496,69 +626,96 @@ impl Game {
                 let mut any_crafting_progress = false;
                 
                 for recipe_idx in 0..self.crafting.get_recipes().len() {
-                    if self.crafting.is_recipe_unlocked(recipe_idx) && 
-                       self.crafting.can_craft(recipe_idx, self.player.wood, self.player.copper) {
+                    // Allow typing the craft sentence for any unlocked recipe (even if resources are missing)
+                    if self.crafting.is_recipe_unlocked(recipe_idx) {
                         if self.crafting.handle_input(recipe_idx, c) {
                             any_crafting_progress = true;
-                            // Check if crafting is complete
-                            if let Some((recipe, costs)) = self.crafting.craft_item(recipe_idx) {
-                                self.stats.add_successful_craft();
-                                
-                                // Deduct resources
-                                for (resource_type, amount) in costs {
-                                    match resource_type {
-                                        ResourceType::Wood => self.player.wood -= amount,
-                                        ResourceType::Copper => self.player.copper -= amount,
-                                    }
-                                }
 
-                                // Show crafting success message
-                                self.floating_texts.add_text(
-                                    format!("Crafted {}!", recipe.name),
-                                    self.player.position.x as f32,
-                                    self.player.position.y as f32 - 1.0,
-                                    Color::Yellow
-                                );
+                            // If the sentence is fully typed, attempt to craft only when resources are available
+                            let recipe_ref = &self.crafting.get_recipes()[recipe_idx];
+                            if recipe_ref.current_input == recipe_ref.craft_sentence {
+                                if self.crafting.can_craft(recipe_idx, self.player.wood, self.player.copper) {
+                                    if let Some((recipe, costs)) = self.crafting.craft_item(recipe_idx) {
+                                        self.stats.add_successful_craft();
 
-                                // If this was the workbench, show unlock message
-                                if recipe_idx == 0 {
-                                    self.floating_texts.add_text(
-                                        "New recipes unlocked!".to_string(),
-                                        self.player.position.x as f32,
-                                        self.player.position.y as f32 - 2.0,
-                                        Color::Cyan
-                                    );
-
-                                    // Check and complete the "Build a Workbench" quest (grant rewards)
-                                    if let Some(quest) = self.quest_manager.get_current_quest() {
-                                        let quest_title = quest.title.clone();
-                                        if quest_title == "Build a Workbench" {
-                                            let rewards = quest.rewards.clone();
-                                            // Mark quest complete
-                                            self.quest_manager.complete_current_quest();
-
-                                            // Grant rewards to player and show floating text
-                                            for (res, amt) in &rewards {
-                                                match res {
-                                                    ResourceType::Wood => self.player.wood += *amt,
-                                                    ResourceType::Copper => self.player.copper += *amt,
-                                                }
-                                                self.floating_texts.add_text(
-                                                    format!("+{} {}", amt, res.get_display_name()),
-                                                    self.player.position.x as f32,
-                                                    self.player.position.y as f32 - 3.0,
-                                                    res.get_color()
-                                                );
+                                        // Deduct resources
+                                        for (resource_type, amount) in costs {
+                                            match resource_type {
+                                                ResourceType::Wood => self.player.wood -= amount,
+                                                ResourceType::Copper => self.player.copper -= amount,
+                                                ResourceType::Iron => self.player.iron -= amount,
                                             }
                                         }
+
+                                        // Show crafting success message
+                                        self.floating_texts.add_text(
+                                            format!("Crafted {}!", recipe.name),
+                                            self.player.position.x as f32,
+                                            self.player.position.y as f32 - 1.0,
+                                            Color::Yellow
+                                        );
+
+                                        // If this was the workbench, show unlock message
+                                        if recipe_idx == 0 {
+                                            self.floating_texts.add_text(
+                                                "New recipes unlocked!".to_string(),
+                                                self.player.position.x as f32,
+                                                self.player.position.y as f32 - 2.0,
+                                                Color::Cyan
+                                            );
+
+                                            // Check and complete the "Build a Workbench" quest (grant rewards)
+                                            if let Some(quest) = self.quest_manager.get_current_quest() {
+                                                let quest_title = quest.title.clone();
+                                                if quest_title == "Build a Workbench" {
+                                                    let rewards = quest.rewards.clone();
+                                                    // Mark quest complete
+                                                    self.quest_manager.complete_current_quest();
+
+                                                    // Grant rewards to player and show floating text
+                                                    for (res, amt) in &rewards {
+                                                        match res {
+                                                            ResourceType::Wood => self.player.wood += *amt,
+                                                            ResourceType::Copper => self.player.copper += *amt,
+                                                            ResourceType::Iron => self.player.iron += *amt,
+                                                        }
+                                                        self.floating_texts.add_text(
+                                                            format!("+{} {}", amt, res.get_display_name()),
+                                                            self.player.position.x as f32,
+                                                            self.player.position.y as f32 - 3.0,
+                                                            res.get_color()
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // If player just crafted the Sail action, open the island map (typing required)
+                                        if recipe.name == "Sail" {
+                                            // Open map immediately — player must type the sail phrase to trigger this
+                                            self.show_island_map = true;
+                                            self.island_map_progress = 0.0;
+                                            self.island_map_cursor = self.island_manager.get_current_island_index();
+
+                                            self.floating_texts.add_text(
+                                                "You set the sails — island map opened!".to_string(),
+                                                self.player.position.x as f32,
+                                                self.player.position.y as f32 - 2.0,
+                                                Color::Cyan
+                                            );
+                                        }
                                     }
+                                } else {
+                                    // Full sentence typed but missing resources — notify player
+                                    self.floating_texts.add_text(
+                                        "Not enough resources to craft.".to_string(),
+                                        self.player.position.x as f32,
+                                        self.player.position.y as f32 - 1.0,
+                                        Color::Red,
+                                    );
+                                    // Clear the recipe's typed input so the UI doesn't stay highlighted as 'complete'
+                                    self.crafting.clear_input(recipe_idx);
                                 }
-                                
-                                crafting_completed = true;
-                                completed_recipe_idx = Some(recipe_idx);
-                            } else {
-                                // Track crafting attempt (typing in progress)
-                                self.stats.add_crafting_attempt();
                             }
                         }
                     }
@@ -591,6 +748,7 @@ impl Game {
                     let obj = match resource.resource_type {
                         ResourceType::Wood => self.resource_objects.get("tree"),
                         ResourceType::Copper => self.resource_objects.get("copper"),
+                        ResourceType::Iron => self.resource_objects.get("iron"),
                     };
                     
                     if let Some(obj) = obj {
@@ -618,6 +776,7 @@ impl Game {
                             let target_pos = if let Some(obj) = match resource.resource_type {
                                 ResourceType::Wood => self.resource_objects.get("tree"),
                                 ResourceType::Copper => self.resource_objects.get("copper"),
+                                ResourceType::Iron => self.resource_objects.get("iron"),
                             } {
                                 let (x, y) = obj.get_path_point(resource.position.x as usize, resource.position.y as usize);
                                 Position::new(x as i32, y as i32)
@@ -680,6 +839,7 @@ impl Game {
                                 let target_pos = if let Some(obj) = match resource.resource_type {
                                     ResourceType::Wood => self.resource_objects.get("tree"),
                                     ResourceType::Copper => self.resource_objects.get("copper"),
+                                    ResourceType::Iron => self.resource_objects.get("iron"),
                                 } {
                                     let (x, y) = obj.get_path_point(resource.position.x as usize, resource.position.y as usize);
                                     Position::new(x as i32, y as i32)
@@ -739,6 +899,7 @@ impl Game {
                     if x == game_area.width.saturating_sub(40) {
                         let wood_text = format!("Wood: {}", self.player.wood);
                         let copper_text = format!("Copper: {}", self.player.copper);
+                        let iron_text = format!("Iron: {}", self.player.iron);
                         line_spans.push(Span::styled(
                             wood_text,
                             Style::default().fg(ResourceType::Wood.get_color())
@@ -747,6 +908,11 @@ impl Game {
                         line_spans.push(Span::styled(
                             copper_text,
                             Style::default().fg(ResourceType::Copper.get_color())
+                        ));
+                        line_spans.push(Span::raw(" | "));
+                        line_spans.push(Span::styled(
+                            iron_text,
+                            Style::default().fg(ResourceType::Iron.get_color())
                         ));
                         // Skip the rest of this line
                         break;
@@ -780,6 +946,7 @@ impl Game {
                         let obj = match resource.resource_type {
                             ResourceType::Wood => self.resource_objects.get("tree"),
                             ResourceType::Copper => self.resource_objects.get("copper"),
+                            ResourceType::Iron => self.resource_objects.get("iron"),
                         };
                         
                         if let Some(obj) = obj {
@@ -847,7 +1014,7 @@ impl Game {
         
         // First render the game background and objects
         let game_widget = Paragraph::new(lines.clone())
-            .block(Block::default().borders(Borders::ALL).title("KeyCrafter - Island 1"));
+            .block(Block::default().borders(Borders::ALL).title(format!("KeyCrafter - {}", self.island_manager.get_current_island().name)));
         f.render_widget(game_widget, game_area);
 
         // Then render floating texts on top
@@ -966,9 +1133,12 @@ impl Game {
             f.render_widget(update_widget, update_area);
         }
 
+        // Island map overlay (animated slide-up)
+        self.render_island_map(f, game_area);
+
         // Show debug info at the bottom if enabled
         if self.show_debug_info {
-            let debug_text = format!("Loaded: Wood={}, Copper={}", self.player.wood, self.player.copper);
+            let debug_text = format!("Loaded: Wood={}, Copper={}, Iron={}", self.player.wood, self.player.copper, self.player.iron);
             let debug_pos = Rect::new(
                 game_area.x + 1,
                 game_area.y + game_area.height - 2,
@@ -980,6 +1150,158 @@ impl Game {
             ]));
             f.render_widget(debug_widget, debug_pos);
         }
+    }
+
+    // Animated island-map pop-up rendered from the bottom of the game area
+    fn render_island_map(&self, f: &mut Frame, game_area: Rect) {
+        // Only draw when at least partly visible
+        if self.island_map_progress <= 0.01 {
+            return;
+        }
+
+        // Dimensions
+        let max_h: u16 = 9; // expanded panel when fully shown
+        let h = ((max_h as f32) * self.island_map_progress).max(3.0).round() as u16;
+        let w = (game_area.width.saturating_sub(8)).max(40);
+        let x = game_area.x + ((game_area.width.saturating_sub(w)) / 2);
+        let y = game_area.y + game_area.height.saturating_sub(h + 1);
+        let area = Rect::new(x, y, w, h);
+
+        // Wave/ship animation phase (driven by system time)
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_millis();
+        let phase = (millis / 200) as usize;
+        let wave_chars = ['~', '-', '`', '.'];
+
+        // Build map lines
+        let mut lines: Vec<Line> = Vec::new();
+
+        // Top decorative waving line
+        let mut top_wave = String::new();
+        for i in 0..(w as usize) {
+            let ch = wave_chars[(i + phase) % wave_chars.len()];
+            top_wave.push(ch);
+        }
+        lines.push(Line::from(vec![Span::styled(top_wave, Style::default().fg(Color::Blue))]));
+
+        // Spacer
+        lines.push(Line::from(Span::raw(" ")));
+
+        // Island ASCII rows (3 rows) + labels
+        let left_art = [" /\\ ", "/~~\\", " || "];
+        let right_art = [" /\\ ", "(Fe)", "\\__/"];
+
+        // Precompute names and lengths so labels only appear on the middle row
+        let mut left_name = self.island_manager.get_island_name(0).unwrap_or_else(|| "Tutorial Island".to_string());
+        let mut right_name = self.island_manager.get_island_name(1).unwrap_or_else(|| "Iron Mountains".to_string());
+        let right_level = self.island_manager.get_island_level_requirement(1).unwrap_or(5);
+        let mut right_label = format!("{} (Lvl {})", right_name, right_level);
+
+        // Truncate labels if the panel is narrow
+        let max_label = (w as usize).saturating_sub(24).max(8);
+        if left_name.len() > max_label { left_name = format!("{}...", &left_name[..max_label.saturating_sub(3)]); }
+        if right_label.len() > max_label { right_label = format!("{}...", &right_label[..max_label.saturating_sub(3)]); }
+
+        let left_label_len = left_name.len();
+        let right_label_len = right_label.len();
+        let left_art_w = 4usize; // " /\\ " width
+        let right_art_w = 4usize; // " /\\ " or "(Fe)" width
+
+        for row in 0..3 {
+            let mut spans = Vec::new();
+
+            // Styles (highlight selected)
+            let left_style = if self.island_map_cursor == 0 {
+                Style::default().fg(ResourceType::Wood.get_color()).add_modifier(Modifier::REVERSED | Modifier::BOLD)
+            } else {
+                Style::default().fg(ResourceType::Wood.get_color())
+            };
+            let right_style = if self.island_map_cursor == 1 {
+                Style::default().fg(ResourceType::Iron.get_color()).add_modifier(Modifier::REVERSED | Modifier::BOLD)
+            } else {
+                Style::default().fg(ResourceType::Iron.get_color())
+            };
+
+            // Build line by placing pieces at explicit columns so wrapping/duplication can't occur
+            // Left art
+            spans.push(Span::styled(left_art[row], left_style));
+            spans.push(Span::raw("  "));
+
+            // Left label only on middle row
+            if row == 1 {
+                spans.push(Span::styled(left_name.clone(), left_style));
+            } else {
+                spans.push(Span::raw(" ".repeat(left_label_len)));
+            }
+
+            // compute where to place the right island so it fits within width
+            let current_len = left_art_w + 2 + left_label_len; // characters so far
+            // shift right-island left by N columns (keeps it from hugging the far-right)
+            let desired_left_shift = 15usize;
+            let right_edge_start = if (right_art_w + 2 + right_label_len + current_len) < (w as usize) {
+                (w as usize).saturating_sub(right_art_w + 2 + right_label_len + 1)
+            } else {
+                current_len + 2
+            };
+            let right_start = if right_edge_start > desired_left_shift {
+                let shifted = right_edge_start.saturating_sub(desired_left_shift);
+                // ensure we never overlap the left block
+                std::cmp::max(shifted, current_len + 2)
+            } else {
+                std::cmp::max(right_edge_start, current_len + 2)
+            };
+
+            // Add spacing up to right_start
+            let mut acc_len = current_len;
+            if right_start > acc_len {
+                spans.push(Span::raw(" ".repeat(right_start - acc_len)));
+                acc_len = right_start;
+            }
+
+            // Right art
+            spans.push(Span::styled(right_art[row], right_style));
+            spans.push(Span::raw("  "));
+
+            // Right label only on middle row
+            if row == 1 {
+                spans.push(Span::styled(right_label.clone(), right_style));
+            } else {
+                spans.push(Span::raw(" ".repeat(right_label_len)));
+            }
+
+            lines.push(Line::from(spans));
+        }
+
+        // Legend / hint
+        lines.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled("<Tab> to switch islands, [Space] to select", Style::default().fg(Color::Gray)),
+            Span::raw("   [m] Close map")
+        ]));
+
+        // Bottom animated wave with a little ship
+        let mut bottom = String::new();
+        let ship_pos = ((millis / 150) % (w as u128)) as usize;
+        for i in 0..(w as usize) {
+            if i == ship_pos {
+                bottom.push('>');
+            } else {
+                let ch = wave_chars[(i + phase) % wave_chars.len()];
+                bottom.push(ch);
+            }
+        }
+        lines.push(Line::from(vec![Span::styled(bottom, Style::default().fg(Color::Blue))]));
+
+        // Render panel
+        let widget = Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("Island Map"))
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: true });
+
+        f.render_widget(Clear, area);
+        f.render_widget(widget, area);
     }
 
     fn render_crafting_area(&self, f: &mut Frame, area: Rect) {
@@ -1099,6 +1421,7 @@ impl Game {
         let difficulty = match resource_type {
             ResourceType::Wood => WordDifficulty::Easy,
             ResourceType::Copper => WordDifficulty::Medium,
+            ResourceType::Iron => WordDifficulty::Medium,
         };
         self.word_list.get_random_word(difficulty).to_string()
     }
@@ -1123,7 +1446,7 @@ impl Game {
         self.stats.update_session_time();
 
         // Validate that we have reasonable data before saving
-        if self.player.wood > 1000 || self.player.copper > 1000 {
+        if self.player.wood > 1000 || self.player.copper > 1000 || self.player.iron > 1000 {
             // eprintln!("Warning: Unusual resource amounts detected, skipping save");
             return Ok(());
         }
@@ -1132,6 +1455,7 @@ impl Game {
             version: 1,
             player_wood: self.player.wood,
             player_copper: self.player.copper,
+            player_iron: self.player.iron,
             completed_items: self.crafting.get_completed_items().to_vec(),
             has_workbench: self.crafting.has_workbench,
             has_boat: self.crafting.get_completed_items().iter().any(|it| it == "Boat"),
@@ -1268,3 +1592,4 @@ fn ui(f: &mut Frame, game: &mut Game) {
     game.render_game_area(f, chunks[0]);
     game.render_crafting_area(f, chunks[1]);
 }
+    
