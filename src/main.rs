@@ -698,12 +698,10 @@ impl Game {
                                     }
                                 }
 
-                                // If player just crafted the Sail action, open the island map so they can choose where to go
+                                // If player just crafted the Sail action, notify they can open the map (don't auto-open)
                                 if recipe.name == "Sail" {
-                                    self.show_island_map = true;
-                                    self.island_map_progress = 0.0; // start open animation
                                     self.floating_texts.add_text(
-                                        "You set the sails — island map opened!".to_string(),
+                                        "Sails ready — press 'm' to open the island map.".to_string(),
                                         self.player.position.x as f32,
                                         self.player.position.y as f32 - 2.0,
                                         Color::Cyan
@@ -1013,7 +1011,7 @@ impl Game {
         
         // First render the game background and objects
         let game_widget = Paragraph::new(lines.clone())
-            .block(Block::default().borders(Borders::ALL).title("KeyCrafter - Island 1"));
+            .block(Block::default().borders(Borders::ALL).title(format!("KeyCrafter - {}", self.island_manager.get_current_island().name)));
         f.render_widget(game_widget, game_area);
 
         // Then render floating texts on top
@@ -1207,10 +1205,11 @@ impl Game {
                 Style::default().fg(ResourceType::Iron.get_color())
             };
 
-            // Left island (Starter Grove)
+            // Left island (tutorial/current start)
+            let left_name = self.island_manager.get_island_name(0).unwrap_or_else(|| "Tutorial Island".to_string());
             spans.push(Span::styled(left_art[row], left_style));
             spans.push(Span::raw("  "));
-            spans.push(Span::styled("Starter Grove", left_style));
+            spans.push(Span::styled(left_name, left_style));
 
             // Flexible padding to place the right island near the middle/right
             let left_len = 4 + 2 + "Starter Grove".len();
@@ -1218,10 +1217,12 @@ impl Game {
             let gap = padding.saturating_sub(left_len + 20); // reserve ~20 chars for right island
             spans.push(Span::raw(" ".repeat(gap)));
 
-            // Right island (Iron Mountains)
+            // Right island (other)
+            let right_name = self.island_manager.get_island_name(1).unwrap_or_else(|| "Iron Mountains".to_string());
+            let right_level = self.island_manager.get_island_level_requirement(1).unwrap_or(5);
             spans.push(Span::styled(right_art[row], right_style));
             spans.push(Span::raw("  "));
-            spans.push(Span::styled("Iron Mountains (Lvl 5)", right_style));
+            spans.push(Span::styled(format!("{} (Lvl {})", right_name, right_level), right_style));
 
             lines.push(Line::from(spans));
         }
