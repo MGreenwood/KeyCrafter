@@ -134,4 +134,23 @@ impl IslandManager {
 
         None
     }
+
+    // Public helpers for UI / selection
+    pub fn island_count(&self) -> usize {
+        self.islands.len()
+    }
+
+    pub fn get_island_name(&self, index: usize) -> Option<String> {
+        self.islands.get(index).map(|i| i.name.clone())
+    }
+
+    pub fn get_current_island_index(&self) -> usize {
+        self.current_island
+    }
+
+    pub fn set_current_island(&mut self, index: usize) {
+        if index < self.islands.len() {
+            self.current_island = index;
+        }
+    }
 } 

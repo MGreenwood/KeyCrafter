@@ -103,6 +103,12 @@ struct Game {
     save_manager: SaveManager,
     stats: GameStats,
     show_debug_info: bool,
+
+    // Island map UI
+    show_island_map: bool,
+    island_map_progress: f32, // 0.0 (hidden) .. 1.0 (fully shown)
+    island_map_cursor: usize, // which island is highlighted in the map
+
     updater: Updater,
     pending_update: Option<VersionInfo>,
     coastline: Coastline,
@@ -195,6 +201,10 @@ impl Game {
             save_manager,
             stats: save_data.stats,
             show_debug_info: false,
+            // Island map defaults
+            show_island_map: false,
+            island_map_progress: 0.0,
+            island_map_cursor: 0,
             updater: Updater::new(),
             pending_update: None,
             coastline: Coastline::new(),
@@ -221,6 +231,15 @@ impl Game {
         if now.duration_since(self.last_update) >= Duration::from_millis(50) {
             // Update floating texts
             self.floating_texts.update();
+
+            // Animate island-map panel (simple linear progress)
+            const MAP_STEP: f32 = 0.12; // ~8-9 frames to fully open/close
+            if self.show_island_map && self.island_map_progress < 1.0 {
+                self.island_map_progress = (self.island_map_progress + MAP_STEP).min(1.0);
+            } else if !self.show_island_map && self.island_map_progress > 0.0 {
+                self.island_map_progress = (self.island_map_progress - MAP_STEP).max(0.0);
+            }
+
             self.last_update = now;
         }
 
@@ -250,6 +269,7 @@ impl Game {
             let obj = match resource.resource_type {
                 ResourceType::Wood => self.resource_objects.get("tree"),
                 ResourceType::Copper => self.resource_objects.get("copper"),
+                ResourceType::Iron => self.resource_objects.get("iron"),
             };
             
             if let Some(obj) = obj {
@@ -363,12 +383,13 @@ impl Game {
             let target_pos = if let Some(obj) = match resource.resource_type {
                 ResourceType::Wood => self.resource_objects.get("tree"),
                 ResourceType::Copper => self.resource_objects.get("copper"),
+                ResourceType::Iron => self.resource_objects.get("iron"),
             } {
                 let (x, y) = obj.get_path_point(resource.position.x as usize, resource.position.y as usize);
                 Position::new(x as i32, y as i32)
             } else {
                 resource.position.clone()
-            };
+            }; 
 
             let distance = self.player.position.manhattan_distance(&target_pos);
             if distance <= 2 && resource.current_input == resource.craft_sentence {
@@ -446,6 +467,7 @@ impl Game {
                                 let difficulty = match resource_type {
                                     ResourceType::Wood => WordDifficulty::Easy,
                                     ResourceType::Copper => WordDifficulty::Medium,
+                                    ResourceType::Iron => WordDifficulty::Medium,
                                 };
                                 
                                 let (min_harvests, max_harvests) = resource_type.get_base_harvests();
@@ -482,6 +504,101 @@ impl Game {
         // Stop showing debug info after first key press
         self.show_debug_info = false;
 
+        // If the island map is open, handle map-specific keys (Tab to cycle, Space/Enter to select, m to close)
+        if self.island_map_progress > 0.0 {
+            match key.code {
+                KeyCode::Tab => {
+                    let count = self.island_manager.island_count();
+                    if count > 0 {
+                        self.island_map_cursor = (self.island_map_cursor + 1) % count;
+                    }
+                    return None;
+                }
+                KeyCode::Char(' ') | KeyCode::Enter => {
+                    let idx = self.island_map_cursor;
+
+                    // Already on this island?
+                    if idx == self.island_manager.get_current_island_index() {
+                        self.floating_texts.add_text(
+                            "You're already on this island.".to_string(),
+                            40.0,
+                            6.0,
+                            Color::Gray,
+                        );
+                        return None;
+                    }
+
+                    // Need a boat to travel
+                    let has_boat = self.crafting.get_completed_items().iter().any(|it| it == "Boat");
+                    if !has_boat {
+                        self.floating_texts.add_text(
+                            "You need a Boat to travel!".to_string(),
+                            40.0,
+                            6.0,
+                            Color::Red,
+                        );
+                        return None;
+                    }
+
+                    // Perform travel: switch island and respawn nodes
+                    self.island_manager.set_current_island(idx);
+                    let current_island = self.island_manager.get_current_island();
+
+                    // Clear and spawn new resources for the selected island
+                    self.resources.clear();
+                    self.grid.clear_obstacles();
+                    let mut existing_positions: Vec<(i32, i32)> = Vec::new();
+                    let mut rng = rand::thread_rng();
+                    for _ in 0..current_island.max_nodes {
+                        if let Some((x, y)) = self.island_manager.find_spawn_position(&existing_positions, 80, 24) {
+                            existing_positions.push((x, y));
+                            let resource_type = self.island_manager.get_random_resource_type();
+                            let difficulty = match resource_type {
+                                ResourceType::Wood => WordDifficulty::Easy,
+                                ResourceType::Copper => WordDifficulty::Medium,
+                                ResourceType::Iron => WordDifficulty::Medium,
+                            };
+                            let (min_harvests, max_harvests) = resource_type.get_base_harvests();
+                            let max_harvests = rng.gen_range(min_harvests..=max_harvests);
+                            let word = self.word_list.get_random_word(difficulty).to_string();
+                            let next_word = self.word_list.get_random_word(difficulty).to_string();
+                            let new_resource = Resource {
+                                position: Position::new(x, y),
+                                resource_type,
+                                craft_sentence: word,
+                                next_craft_sentence: next_word,
+                                current_input: String::new(),
+                                harvests_remaining: max_harvests,
+                                max_harvests,
+                                path: Vec::new(),
+                                word_start_time: None,
+                            };
+                            self.grid.add_obstacle(new_resource.position.clone());
+                            self.resources.push(new_resource);
+                        }
+                    }
+
+                    // Center player and show confirmation
+                    self.player.position = Position::new(40, 12);
+                    self.floating_texts.add_text(
+                        format!("Sailed to {}!", current_island.name),
+                        40.0,
+                        6.0,
+                        Color::Cyan,
+                    );
+
+                    // Close the map
+                    self.show_island_map = false;
+                    return None;
+                }
+                KeyCode::Char('m') => {
+                    self.show_island_map = false;
+                    return None;
+                }
+                _ => return None,
+            }
+        }
+
         match key.code {
             KeyCode::Char('u') if self.pending_update.is_some() => {
                 // Clone version info before any mutable borrow
@@ -501,6 +618,19 @@ impl Game {
                     }
                 }
             }
+
+            // Toggle island map
+            KeyCode::Char('m') => {
+                self.show_island_map = !self.show_island_map;
+                // start animation if opening
+                if self.show_island_map {
+                    self.island_map_progress = 0.0;
+                    // start cursor on current island
+                    self.island_map_cursor = self.island_manager.get_current_island_index();
+                }
+                return None;
+            }
+
             KeyCode::Char(c) => {
                 // Handle crafting input - check all recipes simultaneously
                 let mut crafting_completed = false;
@@ -566,6 +696,18 @@ impl Game {
                                             }
                                         }
                                     }
+                                }
+
+                                // If player just crafted the Sail action, open the island map so they can choose where to go
+                                if recipe.name == "Sail" {
+                                    self.show_island_map = true;
+                                    self.island_map_progress = 0.0; // start open animation
+                                    self.floating_texts.add_text(
+                                        "You set the sails — island map opened!".to_string(),
+                                        self.player.position.x as f32,
+                                        self.player.position.y as f32 - 2.0,
+                                        Color::Cyan
+                                    );
                                 }
                                 
                                 crafting_completed = true;
@@ -990,6 +1132,9 @@ impl Game {
             f.render_widget(update_widget, update_area);
         }
 
+        // Island map overlay (animated slide-up)
+        self.render_island_map(f, game_area);
+
         // Show debug info at the bottom if enabled
         if self.show_debug_info {
             let debug_text = format!("Loaded: Wood={}, Copper={}, Iron={}", self.player.wood, self.player.copper, self.player.iron);
@@ -1004,6 +1149,111 @@ impl Game {
             ]));
             f.render_widget(debug_widget, debug_pos);
         }
+    }
+
+    // Animated island-map pop-up rendered from the bottom of the game area
+    fn render_island_map(&self, f: &mut Frame, game_area: Rect) {
+        // Only draw when at least partly visible
+        if self.island_map_progress <= 0.01 {
+            return;
+        }
+
+        // Dimensions
+        let max_h: u16 = 9; // expanded panel when fully shown
+        let h = ((max_h as f32) * self.island_map_progress).max(3.0).round() as u16;
+        let w = (game_area.width.saturating_sub(8)).max(40);
+        let x = game_area.x + ((game_area.width.saturating_sub(w)) / 2);
+        let y = game_area.y + game_area.height.saturating_sub(h + 1);
+        let area = Rect::new(x, y, w, h);
+
+        // Wave/ship animation phase (driven by system time)
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_millis();
+        let phase = (millis / 200) as usize;
+        let wave_chars = ['~', '-', '`', '.'];
+
+        // Build map lines
+        let mut lines: Vec<Line> = Vec::new();
+
+        // Top decorative waving line
+        let mut top_wave = String::new();
+        for i in 0..(w as usize) {
+            let ch = wave_chars[(i + phase) % wave_chars.len()];
+            top_wave.push(ch);
+        }
+        lines.push(Line::from(vec![Span::styled(top_wave, Style::default().fg(Color::Blue))]));
+
+        // Spacer
+        lines.push(Line::from(Span::raw(" ")));
+
+        // Island ASCII rows (3 rows) + labels
+        let left_art = [" /\\ ", "/~~\\", " || "];
+        let right_art = [" /\\ ", "(Fe)", "\\__/"];
+
+        for row in 0..3 {
+            let mut spans = Vec::new();
+
+            // Styles (highlight selected)
+            let left_style = if self.island_map_cursor == 0 {
+                Style::default().fg(ResourceType::Wood.get_color()).add_modifier(Modifier::REVERSED | Modifier::BOLD)
+            } else {
+                Style::default().fg(ResourceType::Wood.get_color())
+            };
+            let right_style = if self.island_map_cursor == 1 {
+                Style::default().fg(ResourceType::Iron.get_color()).add_modifier(Modifier::REVERSED | Modifier::BOLD)
+            } else {
+                Style::default().fg(ResourceType::Iron.get_color())
+            };
+
+            // Left island (Starter Grove)
+            spans.push(Span::styled(left_art[row], left_style));
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled("Starter Grove", left_style));
+
+            // Flexible padding to place the right island near the middle/right
+            let left_len = 4 + 2 + "Starter Grove".len();
+            let padding = w as usize; // default pad to full width
+            let gap = padding.saturating_sub(left_len + 20); // reserve ~20 chars for right island
+            spans.push(Span::raw(" ".repeat(gap)));
+
+            // Right island (Iron Mountains)
+            spans.push(Span::styled(right_art[row], right_style));
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled("Iron Mountains (Lvl 5)", right_style));
+
+            lines.push(Line::from(spans));
+        }
+
+        // Legend / hint
+        lines.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled("[m] Close map  ", Style::default().fg(Color::Gray)),
+            Span::raw("   Use the islands to travel when you have a boat.")
+        ]));
+
+        // Bottom animated wave with a little ship
+        let mut bottom = String::new();
+        let ship_pos = ((millis / 150) % (w as u128)) as usize;
+        for i in 0..(w as usize) {
+            if i == ship_pos {
+                bottom.push('>');
+            } else {
+                let ch = wave_chars[(i + phase) % wave_chars.len()];
+                bottom.push(ch);
+            }
+        }
+        lines.push(Line::from(vec![Span::styled(bottom, Style::default().fg(Color::Blue))]));
+
+        // Render panel
+        let widget = Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("Island Map"))
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: true });
+
+        f.render_widget(Clear, area);
+        f.render_widget(widget, area);
     }
 
     fn render_crafting_area(&self, f: &mut Frame, area: Rect) {
@@ -1123,6 +1373,7 @@ impl Game {
         let difficulty = match resource_type {
             ResourceType::Wood => WordDifficulty::Easy,
             ResourceType::Copper => WordDifficulty::Medium,
+            ResourceType::Iron => WordDifficulty::Medium,
         };
         self.word_list.get_random_word(difficulty).to_string()
     }
