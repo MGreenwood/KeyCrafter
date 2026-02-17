@@ -1,33 +1,39 @@
 {
   "version": 1,
-  "player_wood": 132,
-  "player_copper": 119,
-  "player_iron": 0,
-  "player_level": 3,
-  "player_xp": 44,
-  "completed_items": [],
-  "has_workbench": false,
-  "has_boat": false,
-  "has_iron_sword_unlocked": false,
-  "current_island_index": 0,
-  "completed_quests": [],
+  "player_wood": 100,
+  "player_copper": 112,
+  "player_iron": 12,
+  "player_level": 5,
+  "player_xp": 401,
+  "completed_items": [
+    "Workbench",
+    "Boat"
+  ],
+  "has_workbench": true,
+  "has_boat": true,
+  "has_iron_sword_unlocked": true,
+  "current_island_index": 1,
+  "completed_quests": [
+    "Build a Workbench"
+  ],
   "axe_upgrade_count": 0,
   "pickaxe_upgrade_count": 0,
   "stats": {
-    "words_typed": 73,
-    "characters_typed": 344,
+    "words_typed": 298,
+    "characters_typed": 1351,
     "resources_harvested": {
-      "Copper": 26,
-      "Wood": 32
+      "Copper": 66,
+      "Wood": 125,
+      "Iron": 17
     },
-    "total_play_time_seconds": 1661,
-    "session_start_time": 1771313736,
-    "words_completed": 73,
+    "total_play_time_seconds": 54037,
+    "session_start_time": 1771366112,
+    "words_completed": 298,
     "crafting_attempts": 0,
-    "successful_crafts": 0,
-    "mistakes_made": 114,
-    "fastest_word_time": 0.21632169,
-    "average_wpm": 2.6593807
+    "successful_crafts": 5,
+    "mistakes_made": 348,
+    "fastest_word_time": 0.1836914,
+    "average_wpm": 0.33116633
   },
-  "save_timestamp": 1771313736
+  "save_timestamp": 1771366112
 }

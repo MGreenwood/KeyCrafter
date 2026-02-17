@@ -869,20 +869,45 @@ impl Game {
                     }
                 }
 
-                // Process each word independently
+                // Process letter input in two phases to avoid a *new* word stealing a
+                // keystroke that should complete an *in‑progress* word.
+                // Phase A: handle continuations (resources with non-empty current_input)
+                let mut continuation_accepted = false;
                 for (resource_idx, resource) in self.resources.iter_mut().enumerate() {
+                    if resource.current_input.is_empty() {
+                        continue; // only handle continuations in this phase
+                    }
+
                     let current_pos = resource.current_input.len();
                     let target_word = &resource.craft_sentence;
+                    let expected = target_word.chars().nth(current_pos);
 
-                    // If we haven't started this word yet, check if this is the first letter
-                    if current_pos == 0 {
-                        let expected = target_word.chars().next();
-                        if expected == Some(c) {
-                            // Start this word
-                            resource.current_input.push(c);
-                            resource.word_start_time = Some(Instant::now());
-                            
-                            // Calculate initial path
+                    if expected == Some(c) {
+                        // Continue the word
+                        resource.current_input.push(c);
+
+                        // Move one step along stored path (if any)
+                        if !resource.path.is_empty() {
+                            self.player.position = resource.path.remove(0);
+                        }
+
+                        // Check if word is complete
+                        if resource.current_input == *target_word {
+                            completed_word_idx = Some(resource_idx);
+                            word_completed = true;
+
+                            // Track word completion stats
+                            if let Some(start_time) = resource.word_start_time {
+                                let time_taken = start_time.elapsed().as_secs_f32();
+                                self.stats.add_word_completed(target_word.len() as u32, time_taken);
+
+                                // Award XP per letter for typing words correctly (queue to avoid borrow conflicts)
+                                let xp_gain = target_word.chars().filter(|c| !c.is_whitespace()).count() as u32;
+                                xp_to_award = xp_to_award.saturating_add(xp_gain);
+                            }
+                            resource.word_start_time = None;
+
+                            // Get the target position and decide whether to harvest
                             let target_pos = if let Some(obj) = match resource.resource_type {
                                 ResourceType::Wood => self.resource_objects.get("tree"),
                                 ResourceType::Copper => self.resource_objects.get("copper"),
@@ -893,63 +918,38 @@ impl Game {
                             } else {
                                 resource.position.clone()
                             };
-                            
-                            // Clear and rebuild grid obstacles
-                            self.grid.clear_obstacles();
-                            for (pos, (rx, ry, w, h)) in &resource_obstacles {
-                                if *pos != resource.position {  // Don't block target
-                                    // Add obstacles for the object area
-                                    for dy in 0..*h {
-                                        for dx in 0..*w {
-                                            let obstacle_pos = Position::new((*rx + dx) as i32, (*ry + dy) as i32);
-                                            if obstacle_pos != target_pos {  // Don't block the actual target point
-                                                self.grid.add_obstacle(obstacle_pos);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
 
-                            if let Some(path) = self.grid.find_path(self.player.position.clone(), target_pos.clone()) {
-                                resource.path = path;  // Store path in the resource
-                                self.player.target = Some(target_pos);
-                            }
-
-                            // Move first step
-                            if !resource.path.is_empty() {
-                                self.player.position = resource.path.remove(0);
+                            let distance = self.player.position.manhattan_distance(&target_pos);
+                            if distance <= 2 {
+                                should_harvest = true;
                             }
                         }
+
+                        continuation_accepted = true;
+                    } else {
+                        // Wrong letter for an in-progress word -> cancel it
+                        self.stats.add_mistake();
+                        resource.word_start_time = None;
+                        resource.current_input.clear();
+                        resource.path.clear();
                     }
-                    // If we've started this word, continue it
-                    else if !resource.current_input.is_empty() {
-                        let expected = target_word.chars().nth(current_pos);
-                        if expected == Some(c) {
-                            // Continue the word
-                            resource.current_input.push(c);
+                }
 
-                            // Move one step
-                            if !resource.path.is_empty() {
-                                self.player.position = resource.path.remove(0);
-                            }
+                // Phase B: only allow *starting* new words if no continuation consumed this keystroke.
+                if !continuation_accepted {
+                    for (resource_idx, resource) in self.resources.iter_mut().enumerate() {
+                        let current_pos = resource.current_input.len();
+                        let target_word = &resource.craft_sentence;
 
-                            // Check if word is complete
-                            if resource.current_input == *target_word {
-                                completed_word_idx = Some(resource_idx);
-                                word_completed = true;
-                                
-                                // Track word completion stats
-                                if let Some(start_time) = resource.word_start_time {
-                                    let time_taken = start_time.elapsed().as_secs_f32();
-                                    self.stats.add_word_completed(target_word.len() as u32, time_taken);
+                        // If we haven't started this word yet, check if this is the first letter
+                        if current_pos == 0 {
+                            let expected = target_word.chars().next();
+                            if expected == Some(c) {
+                                // Start this word
+                                resource.current_input.push(c);
+                                resource.word_start_time = Some(Instant::now());
 
-                                    // Award XP per letter for typing words correctly (queue to avoid borrow conflicts)
-                                    let xp_gain = target_word.chars().filter(|c| !c.is_whitespace()).count() as u32;
-                                    xp_to_award = xp_to_award.saturating_add(xp_gain);
-                                }
-                                resource.word_start_time = None;
-                                
-                                // Get the target position
+                                // Calculate initial path
                                 let target_pos = if let Some(obj) = match resource.resource_type {
                                     ResourceType::Wood => self.resource_objects.get("tree"),
                                     ResourceType::Copper => self.resource_objects.get("copper"),
@@ -961,17 +961,32 @@ impl Game {
                                     resource.position.clone()
                                 };
 
-                                let distance = self.player.position.manhattan_distance(&target_pos);
-                                if distance <= 2 {
-                                    should_harvest = true;
-                                } 
+                                // Clear and rebuild grid obstacles
+                                self.grid.clear_obstacles();
+                                for (pos, (rx, ry, w, h)) in &resource_obstacles {
+                                    if *pos != resource.position {  // Don't block target
+                                        // Add obstacles for the object area
+                                        for dy in 0..*h {
+                                            for dx in 0..*w {
+                                                let obstacle_pos = Position::new((*rx + dx) as i32, (*ry + dy) as i32);
+                                                if obstacle_pos != target_pos {  // Don't block the actual target point
+                                                    self.grid.add_obstacle(obstacle_pos);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if let Some(path) = self.grid.find_path(self.player.position.clone(), target_pos.clone()) {
+                                    resource.path = path;  // Store path in the resource
+                                    self.player.target = Some(target_pos);
+                                }
+
+                                // Move first step
+                                if !resource.path.is_empty() {
+                                    self.player.position = resource.path.remove(0);
+                                }
                             }
-                        } else {
-                            // Wrong letter, clear this word
-                            self.stats.add_mistake();
-                            resource.word_start_time = None;
-                            resource.current_input.clear();
-                            resource.path.clear();
                         }
                     }
                 }

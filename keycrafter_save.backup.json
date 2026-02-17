@@ -1,8 +1,10 @@
 {
   "version": 1,
-  "player_wood": 60,
-  "player_copper": 109,
-  "player_iron": 21,
+  "player_wood": 83,
+  "player_copper": 103,
+  "player_iron": 5,
+  "player_level": 5,
+  "player_xp": 126,
   "completed_items": [
     "Workbench",
     "Boat"
@@ -14,24 +16,24 @@
   "completed_quests": [
     "Build a Workbench"
   ],
-  "axe_upgrade_count": 2,
-  "pickaxe_upgrade_count": 1,
+  "axe_upgrade_count": 0,
+  "pickaxe_upgrade_count": 0,
   "stats": {
-    "words_typed": 407,
-    "characters_typed": 1943,
+    "words_typed": 240,
+    "characters_typed": 1076,
     "resources_harvested": {
-      "Wood": 405,
-      "Copper": 205,
-      "Iron": 36
+      "Copper": 55,
+      "Wood": 108,
+      "Iron": 5
     },
-    "total_play_time_seconds": 19832150,
-    "session_start_time": 1771311098,
-    "words_completed": 407,
-    "crafting_attempts": 1737,
-    "successful_crafts": 26,
-    "mistakes_made": 591,
-    "fastest_word_time": 0.0000296,
-    "average_wpm": 0.0012313377
+    "total_play_time_seconds": 53590,
+    "session_start_time": 1771365665,
+    "words_completed": 240,
+    "crafting_attempts": 0,
+    "successful_crafts": 4,
+    "mistakes_made": 322,
+    "fastest_word_time": 0.1836914,
+    "average_wpm": 0.26885736
   },
-  "save_timestamp": 1771311098
+  "save_timestamp": 1771365665
 }
