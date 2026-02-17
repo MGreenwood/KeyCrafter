@@ -19,12 +19,12 @@
     "words_typed": 304,
     "characters_typed": 1428,
     "resources_harvested": {
-      "Copper": 185,
+      "Iron": 17,
       "Wood": 360,
-      "Iron": 17
+      "Copper": 185
     },
-    "total_play_time_seconds": 19830972,
-    "session_start_time": 1771309920,
+    "total_play_time_seconds": 19831414,
+    "session_start_time": 1771310362,
     "words_completed": 304,
     "crafting_attempts": 1737,
     "successful_crafts": 22,
@@ -32,5 +32,5 @@
     "fastest_word_time": 0.0000296,
     "average_wpm": 0.00092458905
   },
-  "save_timestamp": 1771309920
+  "save_timestamp": 1771310362
 }

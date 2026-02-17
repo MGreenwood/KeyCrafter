@@ -113,6 +113,9 @@ struct Game {
     pending_update: Option<VersionInfo>,
     coastline: Coastline,
     quest_manager: QuestManager,
+
+    // Crafting UI state: 0 = normal (three columns), 1 = Tools expanded, 2 = Construction expanded, 3 = Actions expanded
+    crafting_expanded: u8,
 }
 
 impl Game {
@@ -209,6 +212,7 @@ impl Game {
             pending_update: None,
             coastline: Coastline::new(),
             quest_manager: QuestManager::new(),
+            crafting_expanded: 0,
         };
 
         // Restore saved quest completions so UI/state stays consistent
@@ -634,6 +638,20 @@ impl Game {
                         Err(e) => eprintln!("Failed to download update: {}", e),
                     }
                 }
+            }
+
+            // Crafting area column hotkeys: 1 = Tools, 2 = Construction, 3 = Actions
+            KeyCode::Char('1') => {
+                self.crafting_expanded = if self.crafting_expanded == 1 { 0 } else { 1 };
+                return None;
+            }
+            KeyCode::Char('2') => {
+                self.crafting_expanded = if self.crafting_expanded == 2 { 0 } else { 2 };
+                return None;
+            }
+            KeyCode::Char('3') => {
+                self.crafting_expanded = if self.crafting_expanded == 3 { 0 } else { 3 };
+                return None;
             }
 
             KeyCode::Char(c) => {
@@ -1350,10 +1368,10 @@ impl Game {
         let mut mid_lines: Vec<Line> = Vec::new();
         let mut right_lines: Vec<Line> = Vec::new();
 
-        // Column headers
-        left_lines.push(Line::from(Span::styled("Tools", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
+        // Column headers (show hotkey hints)
+        left_lines.push(Line::from(Span::styled("Tools [1]", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
         left_lines.push(Line::from(Span::raw("")));
-        mid_lines.push(Line::from(Span::styled("Construction", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
+        mid_lines.push(Line::from(Span::styled("Construction [2]", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
         mid_lines.push(Line::from(Span::raw("")));
         // Right column header becomes 'Actions' after Boat is built
         let right_header = if self.crafting.get_completed_items().iter().any(|it| it == "Boat") {
@@ -1361,7 +1379,7 @@ impl Game {
         } else {
             "Locked"
         };
-        right_lines.push(Line::from(Span::styled(right_header, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
+        right_lines.push(Line::from(Span::styled(format!("{} [3]", right_header), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
         right_lines.push(Line::from(Span::raw("")));
 
         // Helper to render the craft sentence in one condensed line (shows typed progress)
@@ -1404,7 +1422,8 @@ impl Game {
             let sentence_line = render_sentence(recipe);
 
             // Decide column by recipe type/name
-            if recipe.name.starts_with("Upgrade") {
+            // Treat `Iron Sword` as a Tools entry so it appears in the left column
+            if recipe.name.starts_with("Upgrade") || recipe.name == "Iron Sword" {
                 left_lines.push(header_line);
                 left_lines.push(sentence_line);
                 left_lines.push(Line::from(Span::raw("")));
@@ -1429,9 +1448,17 @@ impl Game {
         let mid_widget = Paragraph::new(mid_lines).wrap(Wrap { trim: true });
         let right_widget = Paragraph::new(right_lines).wrap(Wrap { trim: true });
 
-        f.render_widget(left_widget, cols[0]);
-        f.render_widget(mid_widget, cols[2]);
-        f.render_widget(right_widget, cols[4]);
+        // If a section is expanded, render that section full-width; otherwise render three columns
+        match self.crafting_expanded {
+            1 => { f.render_widget(left_widget, Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(1))); },
+            2 => { f.render_widget(mid_widget, Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(1))); },
+            3 => { f.render_widget(right_widget, Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(1))); },
+            _ => {
+                f.render_widget(left_widget, cols[0]);
+                f.render_widget(mid_widget, cols[2]);
+                f.render_widget(right_widget, cols[4]);
+            }
+        }
     }
 
     fn get_next_word(&self, resource_type: ResourceType) -> String {
