@@ -261,7 +261,8 @@ impl CraftingManager {
                             self.unlocked_recipes[i] = true;
                         }
                     } else {
-                        println!("[ERROR] unlocked_recipes and recipes length mismatch: {} vs {}", unlocked_len, recipes_len);
+                        // This should never happen; use a debug assertion so it fails loudly in debug builds
+                        debug_assert_eq!(unlocked_len, recipes_len, "unlocked_recipes and recipes length mismatch: {} vs {}", unlocked_len, recipes_len);
                     }
                 } else if recipe.name == "Boat" {
                     // Mark one-time construction as completed and add to collection
@@ -279,10 +280,7 @@ impl CraftingManager {
                 // Capture a clone of the recipe and its costs to return after the mutable borrow
                 result = Some((recipe.clone(), recipe.requirements.clone()));
 
-                // Debug print info available now but don't return yet so we can handle post-borrow actions
-                if let (Some(name), Some(idx)) = (crafted_name.clone(), crafted_idx) {
-                    println!("[DEBUG] Crafted {} at index {}", name, idx);
-                }
+                // Debug print info removed to avoid corrupting the TUI during runtime. Use logging/file-output if needed.
             }
         }
 
@@ -483,13 +481,8 @@ impl CraftingManager {
             let quest_rewards = quest.rewards.clone(); // Clone the rewards to avoid borrow conflict
             if quest_title == "Build a Workbench" && self.has_workbench {
                 quest_manager.complete_current_quest();
-                println!("Quest Completed: {}", quest_title);
-                for (resource, amount) in &quest_rewards {
-                    println!("Gained: +{} {}", amount, resource.get_display_name());
-                }
-
-                // Ensure quest completion updates the quest display area
-                println!("Quest display updated: {}", quest_manager.display_quest());
+                // Removed console debug prints to avoid corrupting the TUI. If needed, consider showing
+                // a floating in-game message or writing to a debug log file instead.
             }
         }
     }

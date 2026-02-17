@@ -43,6 +43,7 @@ use std::{
     time::{Duration, Instant},
     env,
 };
+use std::io::Write;
 
 // Using Position from pathfinding module
 
@@ -68,6 +69,8 @@ struct Player {
     wood: u32,
     copper: u32,
     iron: u32,
+    level: u32,
+    xp: u32,
 }
 
 impl Player {
@@ -79,6 +82,8 @@ impl Player {
             wood: 0,
             copper: 0,
             iron: 0,
+            level: 1,
+            xp: 0,
         }
     }
     
@@ -116,6 +121,8 @@ struct Game {
 
     // Crafting UI state: 0 = normal (three columns), 1 = Tools expanded, 2 = Construction expanded, 3 = Actions expanded
     crafting_expanded: u8,
+    // Stats panel toggle
+    show_stats: bool,
 }
 
 impl Game {
@@ -126,9 +133,11 @@ impl Game {
         let mut rng = rand::thread_rng();
         let word_list = WordList::new();
         let mut resources = Vec::new();
-        let island_manager = IslandManager::new();
-        
-        // Start with half the max nodes
+        let mut island_manager = IslandManager::new();
+        // Restore saved current island (if valid index)
+        island_manager.set_current_island(save_data.current_island_index as usize);
+
+        // Start with half the max nodes for the restored island
         let current_island = island_manager.get_current_island();
         let initial_nodes = current_island.max_nodes / 2;
         
@@ -182,6 +191,8 @@ impl Game {
         player.wood = save_data.player_wood;
         player.copper = save_data.player_copper;
         player.iron = save_data.player_iron;
+        player.level = save_data.player_level;
+        player.xp = save_data.player_xp;
         
         // Debug output to help track loads
         // println!("Loaded: Wood={}, Copper={}", player.wood, player.copper);
@@ -189,6 +200,9 @@ impl Game {
         // Create crafting manager and load saved state
         let mut crafting = CraftingManager::new();
         crafting.load_from_save(&save_data);
+        
+        // Determine initial stats-panel visibility (show by default on first run)
+        let initial_show_stats = !save_manager.save_exists();
         
         let mut game = Self {
             player,
@@ -213,6 +227,8 @@ impl Game {
             coastline: Coastline::new(),
             quest_manager: QuestManager::new(),
             crafting_expanded: 0,
+            // Stats panel visibility (toggle with '0'). Show by default on first run (no save file).
+            show_stats: initial_show_stats,
         };
 
         // Restore saved quest completions so UI/state stays consistent
@@ -301,6 +317,37 @@ impl Game {
         if let Some(path) = self.grid.find_path(self.player.position.clone(), target.clone()) {
             self.player.path = path;  // Keep the full path including target
             self.player.target = Some(target);
+        }
+    }
+
+    /// Add XP to the player and handle level-ups. Threshold = 100 * current_level.
+    fn award_xp(&mut self, mut amount: u32) {
+        while amount > 0 {
+            let threshold = 100u32.saturating_mul(self.player.level);
+            if threshold == 0 {
+                // defensive: avoid divide-by-zero
+                self.player.xp = self.player.xp.saturating_add(amount);
+                break;
+            }
+
+            let space = threshold.saturating_sub(self.player.xp);
+            if amount < space {
+                self.player.xp = self.player.xp.saturating_add(amount);
+                amount = 0;
+            } else {
+                // fill to level, level up
+                self.player.xp = 0;
+                amount = amount.saturating_sub(space);
+                self.player.level = self.player.level.saturating_add(1);
+                self.floating_texts.add_text(
+                    format!("Level up! {} → L{}", "You", self.player.level),
+                    self.player.position.x as f32,
+                    self.player.position.y as f32 - 2.0,
+                    Color::Yellow,
+                );
+                // Persist on level up
+                let _ = self.save_game();
+            }
         }
     }
     
@@ -549,6 +596,20 @@ impl Game {
                         return None;
                     }
 
+                    // Level requirement check
+                    if let Some(req) = self.island_manager.get_island_level_requirement(idx) {
+                        if self.player.level < req {
+                            let name = self.island_manager.get_island_name(idx).unwrap_or_else(|| "Unknown".to_string());
+                            self.floating_texts.add_text(
+                                format!("Level {} required to travel to {}!", req, name),
+                                40.0,
+                                6.0,
+                                Color::Red,
+                            );
+                            return None;
+                        }
+                    }
+
                     // Need a boat to travel
                     let has_boat = self.crafting.get_completed_items().iter().any(|it| it == "Boat");
                     if !has_boat {
@@ -608,6 +669,9 @@ impl Game {
                         Color::Cyan,
                     );
 
+                    // Persist the player's current island immediately
+                    let _ = self.save_game();
+
                     // Close the map
                     self.show_island_map = false;
                     return None;
@@ -629,13 +693,13 @@ impl Game {
                     match self.updater.download_update(&version_info) {
                         Ok(new_exe_path) => {
                             if let Err(e) = self.updater.apply_update(&new_exe_path) {
-                                eprintln!("Failed to apply update: {}", e);
+                                self.floating_texts.add_text(format!("Update failed: {}", e), 40.0, 10.0, Color::Red);
                             } else {
                                 // Signal that we want to exit for update
                                 return Some(version_info);
                             }
                         }
-                        Err(e) => eprintln!("Failed to download update: {}", e),
+                        Err(e) => self.floating_texts.add_text(format!("Update download failed: {}", e), 40.0, 10.0, Color::Red),
                     }
                 }
             }
@@ -651,6 +715,12 @@ impl Game {
             }
             KeyCode::Char('3') => {
                 self.crafting_expanded = if self.crafting_expanded == 3 { 0 } else { 3 };
+                return None;
+            }
+
+            // Toggle stats panel (bottom-right) with '0'
+            KeyCode::Char('0') => {
+                self.show_stats = !self.show_stats;
                 return None;
             }
 
@@ -699,13 +769,13 @@ impl Game {
                                                 Color::Cyan
                                             );
 
-                                            // Check and complete the "Build a Workbench" quest (grant rewards)
-                                            if let Some(quest) = self.quest_manager.get_current_quest() {
-                                                let quest_title = quest.title.clone();
-                                                if quest_title == "Build a Workbench" {
-                                                    let rewards = quest.rewards.clone();
-                                                    // Mark quest complete
-                                                    self.quest_manager.complete_current_quest();
+                                                                    // Check and complete the "Build a Workbench" quest (grant rewards)
+                                    if let Some(quest) = self.quest_manager.get_current_quest() {
+                                        let quest_title = quest.title.clone();
+                                        if quest_title == "Build a Workbench" {
+                                            let rewards = quest.rewards.clone();
+                                            // Mark quest complete
+                                            self.quest_manager.complete_current_quest();
 
                                                     // Grant rewards to player and show floating text
                                                     for (res, amt) in &rewards {
@@ -721,6 +791,9 @@ impl Game {
                                                             res.get_color()
                                                         );
                                                     }
+
+                                                    // Award XP for quest completion (flat)
+                                                    self.award_xp(50);
                                                 }
                                             }
                                         }
@@ -776,6 +849,8 @@ impl Game {
                 let mut should_harvest = false;
                 let mut completed_word_idx = None;
                 let mut word_completed = false;
+                // Accumulate XP to award after resource loop (avoid mutable-borrow conflicts)
+                let mut xp_to_award: u32 = 0;
 
                 // First collect all resource positions and their obstacles
                 let mut resource_obstacles = Vec::new();
@@ -867,6 +942,10 @@ impl Game {
                                 if let Some(start_time) = resource.word_start_time {
                                     let time_taken = start_time.elapsed().as_secs_f32();
                                     self.stats.add_word_completed(target_word.len() as u32, time_taken);
+
+                                    // Award XP per letter for typing words correctly (queue to avoid borrow conflicts)
+                                    let xp_gain = target_word.chars().filter(|c| !c.is_whitespace()).count() as u32;
+                                    xp_to_award = xp_to_award.saturating_add(xp_gain);
                                 }
                                 resource.word_start_time = None;
                                 
@@ -914,6 +993,11 @@ impl Game {
                 if word_completed {
                     self.try_spawn_resource_on_word_completion();
                 }
+
+                // Award queued XP (outside of the mutable resources borrow)
+                if xp_to_award > 0 {
+                    self.award_xp(xp_to_award);
+                }
             }
             _ => {} // Ignore other key events
         }
@@ -948,6 +1032,12 @@ impl Game {
                         line_spans.push(Span::styled(
                             iron_text,
                             Style::default().fg(ResourceType::Iron.get_color())
+                        ));
+                        // Small hint: toggle player stats panel with '0' (brighter/bold to improve discoverability)
+                        line_spans.push(Span::raw("  "));
+                        line_spans.push(Span::styled(
+                            "[0] Stats",
+                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
                         ));
                         // Skip the rest of this line
                         break;
@@ -1170,6 +1260,35 @@ impl Game {
 
         // Island map overlay (animated slide-up)
         self.render_island_map(f, game_area);
+
+        // Stats panel (toggle with '0') - bottom-right of play area
+        if self.show_stats {
+            const STATS_W: u16 = 30;
+            // Increase height so the Level/XP line fits (content lines = STATS_H - 2)
+            const STATS_H: u16 = 6;
+            const RIGHT_COL_WIDTH: u16 = 40;
+            let mut sx = game_area.x + game_area.width.saturating_sub(STATS_W + 2);
+            if game_area.width > RIGHT_COL_WIDTH + 8 {
+                sx = game_area.x + game_area.width.saturating_sub(RIGHT_COL_WIDTH + STATS_W + 4);
+            }
+            let sy = game_area.y + game_area.height.saturating_sub(STATS_H + 1);
+
+            let mut lines: Vec<Line> = Vec::new();
+            lines.push(Line::from(vec![Span::styled("Player Stats [0]", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD))]));
+            lines.push(Line::from(vec![Span::raw(format!("Words: {}  WPM: {:.1}", self.stats.words_typed, self.stats.average_wpm))]));
+            let acc = self.stats.get_accuracy_percentage();
+            lines.push(Line::from(vec![Span::raw(format!("Mistakes: {}  Acc: {:.0}%", self.stats.mistakes_made, acc))]));
+            let lvl = self.player.level;
+            let xp = self.player.xp;
+            let xp_next = 100u32.saturating_mul(lvl);
+            let pct = if xp_next > 0 { (xp as f32 / xp_next as f32) * 100.0 } else { 0.0 };
+            lines.push(Line::from(vec![Span::raw(format!("Level: {}  XP: {}/{} ({:.0}%)", lvl, xp, xp_next, pct))]));
+
+            let stats_widget = Paragraph::new(lines)
+                .block(Block::default().borders(Borders::ALL).title("Stats"))
+                .wrap(Wrap { trim: true });
+            f.render_widget(stats_widget, Rect::new(sx, sy, STATS_W, STATS_H));
+        }
 
         // Show debug info at the bottom if enabled
         if self.show_debug_info {
@@ -1500,10 +1619,13 @@ impl Game {
             player_wood: self.player.wood,
             player_copper: self.player.copper,
             player_iron: self.player.iron,
+            player_level: self.player.level,
+            player_xp: self.player.xp,
             completed_items: self.crafting.get_completed_items().to_vec(),
             has_workbench: self.crafting.has_workbench,
             has_boat: self.crafting.get_completed_items().iter().any(|it| it == "Boat"),
             has_iron_sword_unlocked: self.crafting.is_unlocked_by_name("Iron Sword"),
+            current_island_index: self.island_manager.get_current_island_index() as u32,
             completed_quests: self.quest_manager.get_completed_quests(),
             axe_upgrade_count: self.crafting.get_recipes()
                 .iter()
@@ -1530,6 +1652,14 @@ impl Game {
     }
 }
 
+fn append_log(msg: &str) {
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("keycrafter.log")
+        .and_then(|mut f| writeln!(f, "{}", msg));
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     // Check for update argument
     let args: Vec<String> = env::args().collect();
@@ -1552,7 +1682,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         loop {
             // Draw the UI
             if let Err(e) = terminal.draw(|f| ui(f, &mut game)) {
-                eprintln!("Failed to draw UI: {}", e);
+                append_log(&format!("Failed to draw UI: {}", e));
                 break Err(e.into());
             }
 
@@ -1584,7 +1714,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                     Ok(_) => {} // Ignore other events
                     Err(e) => {
-                        eprintln!("Event read error: {}", e);
+                        append_log(&format!("Event read error: {}", e));
                         break Err(e.into());
                     }
                 }
@@ -1609,14 +1739,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Handle cleanup errors
     if let Err(cleanup_err) = cleanup_result {
-        eprintln!("Failed to cleanup terminal: {}", cleanup_err);
+        append_log(&format!("Failed to cleanup terminal: {}", cleanup_err));
     }
 
     // Handle the main result
     match result {
         Ok(game_result) => game_result,
         Err(_) => {
-            eprintln!("Game panicked, but terminal should be restored");
+            append_log("Game panicked, but terminal should be restored");
             Err("Game panicked".into())
         }
     }

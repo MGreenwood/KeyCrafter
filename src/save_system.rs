@@ -48,12 +48,16 @@ pub struct SaveData {
     pub player_copper: u32,
     #[serde(default)]
     pub player_iron: u32,
+    pub player_level: u32,
+    pub player_xp: u32,
     pub completed_items: Vec<String>,
     pub has_workbench: bool,
     #[serde(default)]
     pub has_boat: bool,
     #[serde(default)]
     pub has_iron_sword_unlocked: bool,
+    #[serde(default)]
+    pub current_island_index: u32,
     #[serde(default)]
     pub completed_quests: Vec<String>,
     pub axe_upgrade_count: u32,
@@ -69,10 +73,13 @@ impl Default for SaveData {
             player_wood: 0,
             player_copper: 0,
             player_iron: 0,
+            player_level: 1,
+            player_xp: 0,
             completed_items: Vec::new(),
             has_workbench: false,
             has_boat: false,
             has_iron_sword_unlocked: false,
+            current_island_index: 0,
             completed_quests: Vec::new(),
             axe_upgrade_count: 0,
             pickaxe_upgrade_count: 0,
@@ -182,6 +189,31 @@ impl SaveManager {
             fs::remove_file(&self.backup_file_path)?;
         }
         Ok(())
+    }
+
+    /// Returns true if a primary save file already exists on disk.
+    pub fn save_exists(&self) -> bool {
+        Path::new(&self.save_file_path).exists()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_data_defaults_current_island_zero() {
+        let d = SaveData::default();
+        assert_eq!(d.current_island_index, 0);
+    }
+
+    #[test]
+    fn save_data_ser_roundtrip_current_island() {
+        let mut d = SaveData::default();
+        d.current_island_index = 2;
+        let s = serde_json::to_string(&d).unwrap();
+        let parsed: SaveData = serde_json::from_str(&s).unwrap();
+        assert_eq!(parsed.current_island_index, 2);
     }
 }
 
