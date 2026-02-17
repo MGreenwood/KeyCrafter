@@ -106,6 +106,21 @@ impl CraftingManager {
         });
         manager.unlocked_recipes.push(false);  // Remains locked until Boat is built
 
+        // Weapon: Iron Sword (first weapon; unlocks when player first collects Iron)
+        let mut sword_reqs = HashMap::new();
+        sword_reqs.insert(ResourceType::Iron, 5);
+        sword_reqs.insert(ResourceType::Copper, 2);
+        manager.recipes.push(Recipe {
+            name: "Iron Sword".to_string(),
+            description: "A basic iron blade — your first weapon.".to_string(),
+            craft_sentence: "I forge an iron sword.".to_string(),
+            current_input: String::new(),
+            requirements: sword_reqs,
+            unlocks: vec![],
+            upgrade_count: 0,
+        });
+        manager.unlocked_recipes.push(false); // Locked until first iron collection
+
         manager
     }
 
@@ -148,10 +163,16 @@ impl CraftingManager {
             pickaxe_recipe.upgrade_count = save_data.pickaxe_upgrade_count;
         }
         
-        // Update unlocked recipes based on workbench status
+        // Update unlocked recipes based on workbench status (keep 'Sail' locked until Boat is built)
         if self.has_workbench {
-            for i in 1..self.unlocked_recipes.len() {
-                self.unlocked_recipes[i] = true;
+            for (i, recipe) in self.recipes.iter().enumerate().skip(1) {
+                if recipe.name == "Sail" {
+                    // leave Sail locked until Boat is built
+                    continue;
+                }
+                if i < self.unlocked_recipes.len() {
+                    self.unlocked_recipes[i] = true;
+                }
             }
         }
 
@@ -163,6 +184,15 @@ impl CraftingManager {
             if let Some(sail_idx) = self.recipes.iter().position(|r| r.name == "Sail") {
                 if sail_idx < self.unlocked_recipes.len() {
                     self.unlocked_recipes[sail_idx] = true;
+                }
+            }
+        }
+
+        // Restore Iron Sword unlocked flag (persisted separately)
+        if save_data.has_iron_sword_unlocked {
+            if let Some(sword_idx) = self.recipes.iter().position(|r| r.name == "Iron Sword") {
+                if sword_idx < self.unlocked_recipes.len() {
+                    self.unlocked_recipes[sword_idx] = true;
                 }
             }
         }
@@ -188,6 +218,9 @@ impl CraftingManager {
             false
         }
     }
+
+
+
 
     pub fn get_requirements_text(&self, recipe: &Recipe) -> String {
         let mut parts = Vec::new();
@@ -221,9 +254,10 @@ impl CraftingManager {
                 if recipe_index == 0 {
                     self.has_workbench = true;
                     self.completed_items.push("Workbench".to_string());
-                    // Unlock all workbench-dependent recipes, but only if the vectors are in sync
+                    // Unlock workbench-dependent recipes, but keep 'Sail' locked until Boat is built
                     if unlocked_len == recipes_len {
                         for i in 1..self.unlocked_recipes.len() {
+                            if Some(i) == sail_pos { continue; }
                             self.unlocked_recipes[i] = true;
                         }
                     } else {
@@ -317,6 +351,25 @@ impl CraftingManager {
                 1.0
             },
         }
+    }
+
+    /// Unlock a recipe by name (returns true if we changed state)
+    pub fn unlock_recipe(&mut self, name: &str) -> bool {
+        if let Some(idx) = self.recipes.iter().position(|r| r.name == name) {
+            if idx < self.unlocked_recipes.len() && !self.unlocked_recipes[idx] {
+                self.unlocked_recipes[idx] = true;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Return unlocked flag for a recipe (does NOT consider `has_workbench` visibility gating)
+    pub fn is_unlocked_by_name(&self, name: &str) -> bool {
+        if let Some(idx) = self.recipes.iter().position(|r| r.name == name) {
+            return self.unlocked_recipes.get(idx).copied().unwrap_or(false);
+        }
+        false
     }
 
     // Get the next cost for an upgrade recipe
@@ -439,5 +492,81 @@ impl CraftingManager {
                 println!("Quest display updated: {}", quest_manager.display_quest());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::save_system::SaveData;
+
+    #[test]
+    fn sail_locked_until_boat_on_save_load() {
+        let mut mgr = CraftingManager::new();
+        let sail_idx = mgr.recipes.iter().position(|r| r.name == "Sail").unwrap();
+        let axe_idx = mgr.recipes.iter().position(|r| r.name == "Upgrade Axe").unwrap();
+
+        // Default: no workbench -> sail locked
+        assert!(!mgr.is_recipe_unlocked(sail_idx));
+
+        // Load save with workbench only -> sail should remain locked, other workbench recipes unlocked
+        let mut save = SaveData::default();
+        save.has_workbench = true;
+        save.has_boat = false;
+        mgr.load_from_save(&save);
+        assert!(mgr.is_recipe_unlocked(axe_idx));
+        assert!(!mgr.is_recipe_unlocked(sail_idx));
+
+        // Load save with boat -> sail unlocked
+        save.has_boat = true;
+        mgr.load_from_save(&save);
+        assert!(mgr.is_recipe_unlocked(sail_idx));
+    }
+
+    #[test]
+    fn sail_locked_until_boat_at_runtime() {
+        let mut mgr = CraftingManager::new();
+        let sail_idx = mgr.recipes.iter().position(|r| r.name == "Sail").unwrap();
+        let boat_idx = mgr.recipes.iter().position(|r| r.name == "Boat").unwrap();
+        let axe_idx = mgr.recipes.iter().position(|r| r.name == "Upgrade Axe").unwrap();
+
+        // Craft workbench (simulate typing the sentence)
+        {
+            let wb = mgr.get_recipe_mut(0).unwrap();
+            wb.current_input = wb.craft_sentence.clone();
+        }
+        assert!(mgr.craft_item(0).is_some());
+        // Workbench unlocks upgrades but Sail remains locked
+        assert!(mgr.is_recipe_unlocked(axe_idx));
+        assert!(!mgr.is_recipe_unlocked(sail_idx));
+
+        // Craft boat -> Sail should unlock
+        {
+            let boat = mgr.get_recipe_mut(boat_idx).unwrap();
+            boat.current_input = boat.craft_sentence.clone();
+        }
+        assert!(mgr.craft_item(boat_idx).is_some());
+        assert!(mgr.is_recipe_unlocked(sail_idx));
+    }
+
+    #[test]
+    fn iron_collection_unlocks_iron_sword_and_persists() {
+        let mut mgr = CraftingManager::new();
+        // Ensure Iron Sword recipe exists and starts locked
+        let sword_idx = mgr.recipes.iter().position(|r| r.name == "Iron Sword").unwrap();
+        assert!(!mgr.is_unlocked_by_name("Iron Sword"));
+
+        // Simulate loading a save that had the sword unlocked
+        let mut save = SaveData::default();
+        save.has_iron_sword_unlocked = true;
+        mgr.load_from_save(&save);
+        assert!(mgr.is_unlocked_by_name("Iron Sword"));
+
+        // Test unlock_recipe runtime helper
+        let mut mgr2 = CraftingManager::new();
+        assert!(mgr2.unlock_recipe("Iron Sword"));
+        assert!(mgr2.is_unlocked_by_name("Iron Sword"));
+        // Unlocking again should return false
+        assert!(!mgr2.unlock_recipe("Iron Sword"));
     }
 }

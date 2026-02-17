@@ -177,7 +177,7 @@ del "%~f0"
             
             // Start the batch file in a completely detached process
             Command::new("cmd")
-                .args(&["/C", "start", "/min", "/B", "", batch_path])
+                .args(&["/C", "start", "/min", "", batch_path])
                 .spawn()?;
             
             // Give the batch file a moment to start properly

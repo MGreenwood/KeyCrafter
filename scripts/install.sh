@@ -4,7 +4,7 @@
 if [[ "$OSTYPE" == "darwin"* ]]; then
     BINARY="keycrafter-darwin-x64"
 else
-    BINARY="keycrafter-linux-x64"
+    BINARY="keycrafter-linux-x64" 
 fi
 
 # Create install directory

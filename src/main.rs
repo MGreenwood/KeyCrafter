@@ -412,10 +412,27 @@ impl Game {
                     ResourceType::Iron => {
                         let multiplier = self.crafting.get_multiplier(&ResourceType::Iron);
                         let amount = (multiplier as u32).max(1);
+                        let prev_iron = self.player.iron;
                         self.player.iron += amount;
                         self.stats.add_resource_harvested(ResourceType::Iron, amount);
+
+                        // Unlock Iron Sword the first time the player collects any iron
+                        if prev_iron == 0 {
+                            if self.crafting.unlock_recipe("Iron Sword") {
+                                // show a notification and persist the unlock
+                                self.floating_texts.add_text(
+                                    "New craft unlocked: Iron Sword".to_string(),
+                                    self.player.position.x as f32,
+                                    self.player.position.y as f32 - 1.0,
+                                    Color::Yellow,
+                                );
+                                let _ = self.save_game();
+                            }
+                        }
+
                         (amount, "Iron".to_string(), ResourceType::Iron.get_color())
                     },
+
                 };
                 harvest_idx = Some(idx);
                 harvest_amount = amount;
@@ -1459,6 +1476,7 @@ impl Game {
             completed_items: self.crafting.get_completed_items().to_vec(),
             has_workbench: self.crafting.has_workbench,
             has_boat: self.crafting.get_completed_items().iter().any(|it| it == "Boat"),
+            has_iron_sword_unlocked: self.crafting.is_unlocked_by_name("Iron Sword"),
             completed_quests: self.quest_manager.get_completed_quests(),
             axe_upgrade_count: self.crafting.get_recipes()
                 .iter()
