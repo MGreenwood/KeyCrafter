@@ -153,7 +153,14 @@ impl CraftingManager {
 
     pub fn load_from_save(&mut self, save_data: &crate::save_system::SaveData) {
         self.has_workbench = save_data.has_workbench;
-        self.completed_items = save_data.completed_items.clone();
+        // Reconstruct runtime completed-items from boolean flags in the save (legacy `completed_items` removed)
+        self.completed_items.clear();
+        if save_data.has_workbench {
+            self.completed_items.push("Workbench".to_string());
+        }
+        if save_data.has_boat {
+            self.completed_items.push("Boat".to_string());
+        }
         
         // Restore upgrade counts
         if let Some(axe_recipe) = self.recipes.iter_mut().find(|r| r.name == "Upgrade Axe") {

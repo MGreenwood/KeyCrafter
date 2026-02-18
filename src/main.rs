@@ -123,6 +123,17 @@ struct Game {
     crafting_expanded: u8,
     // Stats panel toggle
     show_stats: bool,
+
+    // Inventory UI & state
+    inventory: Vec<save_system::InventoryItem>,
+    show_inventory: bool,
+
+    // Typing-based equip command state: user types "equip <name>" then item name; Tab cycles matches
+    command_buffer: String,
+    inventory_cmd_active: bool,
+    inventory_query: String,
+    inventory_matches: Vec<usize>,
+    inventory_selected_match: usize,
 }
 
 impl Game {
@@ -204,6 +215,24 @@ impl Game {
         // Determine initial stats-panel visibility (show by default on first run)
         let initial_show_stats = !save_manager.save_exists();
         
+        // Initialize inventory from save (migrate defaults for Axe/Pickaxe and completed items if none present)
+        let mut inventory = save_data.inventory.clone();
+        if inventory.iter().all(|it| it.name != "Axe") {
+            let axe_count = 1u32.saturating_add(save_data.axe_upgrade_count);
+            inventory.push(save_system::InventoryItem::new("Axe", axe_count, true));
+        }
+        if inventory.iter().all(|it| it.name != "Pickaxe") {
+            let pick_count = 1u32.saturating_add(save_data.pickaxe_upgrade_count);
+            inventory.push(save_system::InventoryItem::new("Pickaxe", pick_count, true));
+        }
+        // Migrate completed one-time items (Workbench, Boat) into inventory when the save flags indicate ownership
+        if save_data.has_workbench && inventory.iter().all(|it| it.name != "Workbench") {
+            inventory.push(save_system::InventoryItem::new("Workbench", 1, false));
+        }
+        if save_data.has_boat && inventory.iter().all(|it| it.name != "Boat") {
+            inventory.push(save_system::InventoryItem::new("Boat", 1, false));
+        }
+        
         let mut game = Self {
             player,
             resources,
@@ -229,6 +258,15 @@ impl Game {
             crafting_expanded: 0,
             // Stats panel visibility (toggle with '0'). Show by default on first run (no save file).
             show_stats: initial_show_stats,
+            // Inventory
+            inventory,
+            show_inventory: false,
+            // Command / equip state
+            command_buffer: String::new(),
+            inventory_cmd_active: false,
+            inventory_query: String::new(),
+            inventory_matches: Vec::new(),
+            inventory_selected_match: 0,
         };
 
         // Restore saved quest completions so UI/state stays consistent
@@ -278,6 +316,14 @@ impl Game {
         }
 
         self.coastline.update();
+
+        // Safety: ensure completed one-time items (Workbench / Boat) are present in inventory
+        // This keeps UI/state consistent when completed_items or save flags indicate these exist.
+        for item in self.crafting.get_completed_items() {
+            if (item == "Workbench" || item == "Boat") && self.inventory.iter().all(|it| it.name != *item) {
+                self.inventory.push(save_system::InventoryItem::new(item, 1, false));
+            }
+        }
     }
     
     fn set_player_target(&mut self, target: Position) {
@@ -320,7 +366,44 @@ impl Game {
         }
     }
 
-    /// Add XP to the player and handle level-ups. Threshold = 100 * current_level.
+    // ---------- Inventory helpers ----------
+    fn add_inventory_item(&mut self, name: &str, count: u32, auto_equip: bool) {
+        if name == "Axe" || name == "Pickaxe" {
+            // Stack upgrades onto the existing tool entry
+            if let Some(it) = self.inventory.iter_mut().find(|it| it.name == name) {
+                it.count = it.count.saturating_add(count);
+                if auto_equip { it.equipped = true; }
+                return;
+            }
+        }
+        // For other items, create a new entry (keeps separate stacks/instances)
+        let equipped = auto_equip && (name == "Axe" || name == "Pickaxe");
+        self.inventory.push(save_system::InventoryItem::new(name, count, equipped));
+    }
+
+    fn equip_inventory_index(&mut self, idx: usize) {
+        if idx >= self.inventory.len() { return; }
+        // Mark the chosen entry as equipped; do NOT auto-unequip other different items — allow multiple equips
+        self.inventory[idx].equipped = true;
+    }
+
+    fn unequip_inventory_name(&mut self, name: &str) {
+        for it in &mut self.inventory {
+            if it.name.eq_ignore_ascii_case(name) {
+                it.equipped = false;
+            }
+        }
+    }
+
+    fn find_inventory_matches(&self, q: &str) -> Vec<usize> {
+        if q.is_empty() { return Vec::new(); }
+        let ql = q.to_lowercase();
+        self.inventory.iter().enumerate()
+            .filter(|(_, it)| it.name.to_lowercase().contains(&ql))
+            .map(|(i, _)| i)
+            .collect()
+    }
+
     fn award_xp(&mut self, mut amount: u32) {
         while amount > 0 {
             let threshold = 100u32.saturating_mul(self.player.level);
@@ -576,6 +659,18 @@ impl Game {
         if self.island_map_progress > 0.0 {
             match key.code {
                 KeyCode::Tab => {
+                    // If the island map is open, Tab cycles islands (handled earlier).
+                    // When an inventory equip command is active, Tab cycles matching inventory entries.
+                    if self.inventory_cmd_active {
+                        if !self.inventory_matches.is_empty() {
+                            self.inventory_selected_match = (self.inventory_selected_match + 1) % self.inventory_matches.len();
+                            let idx = self.inventory_matches[self.inventory_selected_match];
+                            // Update query to show current selection
+                            self.inventory_query = self.inventory[idx].name.clone();
+                        }
+                        return None;
+                    }
+
                     let count = self.island_manager.island_count();
                     if count > 0 {
                         self.island_map_cursor = (self.island_map_cursor + 1) % count;
@@ -718,14 +813,60 @@ impl Game {
                 return None;
             }
 
+            // Toggle inventory overlay with '4'
+            KeyCode::Char('4') => {
+                self.show_inventory = !self.show_inventory;
+                return None;
+            }
+
             // Toggle stats panel (bottom-right) with '0'
             KeyCode::Char('0') => {
                 self.show_stats = !self.show_stats;
                 return None;
             }
 
+            // Backspace while typing inventory command
+            KeyCode::Backspace => {
+                if self.inventory_cmd_active {
+                    self.inventory_query.pop();
+                    self.inventory_matches = self.find_inventory_matches(&self.inventory_query);
+                    return None;
+                }
+            }
+
+            // Enter: complete inventory equip command if active
+            KeyCode::Enter => {
+                if self.inventory_cmd_active {
+                    if !self.inventory_matches.is_empty() {
+                        let idx = self.inventory_matches[self.inventory_selected_match % self.inventory_matches.len()];
+                        self.equip_inventory_index(idx);
+                    } else if !self.inventory_query.is_empty() {
+                        if let Some((i, _)) = self.inventory.iter().enumerate().find(|(_, it)| it.name.eq_ignore_ascii_case(&self.inventory_query)) {
+                            self.equip_inventory_index(i);
+                        }
+                    }
+                    self.inventory_cmd_active = false;
+                    self.command_buffer.clear();
+                    return None;
+                }
+            }
+
             KeyCode::Char(c) => {
-                // Handle crafting input - check all recipes simultaneously
+                    // If an inventory command is active, consume chars for it (don't let them affect crafting/resources)
+                    if self.inventory_cmd_active {
+                        if c == '\u{8}' || c == '\x7f' { // backspace
+                            self.inventory_query.pop();
+                        } else {
+                            self.inventory_query.push(c);
+                        }
+                        // Recompute matches
+                        self.inventory_matches = self.inventory.iter().enumerate()
+                            .filter(|(_, it)| it.name.to_lowercase().contains(&self.inventory_query.to_lowercase()))
+                            .map(|(i, _)| i)
+                            .collect();
+                        return None;
+                    }
+
                 let mut crafting_completed = false;
                 let mut completed_recipe_idx = None;
                 let mut any_crafting_progress = false;
@@ -769,13 +910,16 @@ impl Game {
                                                 Color::Cyan
                                             );
 
-                                                                    // Check and complete the "Build a Workbench" quest (grant rewards)
-                                    if let Some(quest) = self.quest_manager.get_current_quest() {
-                                        let quest_title = quest.title.clone();
-                                        if quest_title == "Build a Workbench" {
-                                            let rewards = quest.rewards.clone();
-                                            // Mark quest complete
-                                            self.quest_manager.complete_current_quest();
+                                            // Ensure Workbench shows up in inventory
+                                            self.add_inventory_item("Workbench", 1, false);
+
+                                            // Check and complete the "Build a Workbench" quest (grant rewards)
+                                            if let Some(quest) = self.quest_manager.get_current_quest() {
+                                                let quest_title = quest.title.clone();
+                                                if quest_title == "Build a Workbench" {
+                                                    let rewards = quest.rewards.clone();
+                                                    // Mark quest complete
+                                                    self.quest_manager.complete_current_quest();
 
                                                     // Grant rewards to player and show floating text
                                                     for (res, amt) in &rewards {
@@ -796,6 +940,24 @@ impl Game {
                                                     self.award_xp(50);
                                                 }
                                             }
+                                        }
+
+                                        // If player crafted a Boat, add to inventory
+                                        if recipe.name == "Boat" {
+                                            self.add_inventory_item("Boat", 1, false);
+                                        }
+
+                                        // Upgrade Axe / Pickaxe should update inventory counts and auto-equip
+                                        if recipe.name == "Upgrade Axe" {
+                                            self.add_inventory_item("Axe", 1, true);
+                                        }
+                                        if recipe.name == "Upgrade Pickaxe" {
+                                            self.add_inventory_item("Pickaxe", 1, true);
+                                        }
+
+                                        // If player crafted an Iron Sword, add one to inventory (not auto-equip)
+                                        if recipe.name == "Iron Sword" {
+                                            self.add_inventory_item("Iron Sword", 1, false);
                                         }
 
                                         // If player just crafted the Sail action, open the island map (typing required)
@@ -846,6 +1008,11 @@ impl Game {
                 }
 
                 // If not crafting, handle resource gathering input
+                // Also: if the user is actively typing an inventory 'equip' command, resource/gathering keys
+                // should not steal characters; only process gather input when no inventory command is active.
+                if self.inventory_cmd_active {
+                    return None;
+                }
                 let mut should_harvest = false;
                 let mut completed_word_idx = None;
                 let mut word_completed = false;
@@ -1013,6 +1180,50 @@ impl Game {
                 if xp_to_award > 0 {
                     self.award_xp(xp_to_award);
                 }
+
+                // ---------- Inventory command handling (typing: "equip <name>") ----------
+                // Capture unconsumed printable characters into a rolling command buffer so the
+                // player can type "equip <name>" anywhere (when not typing craft/resource words).
+                // Start inventory command when buffer ends with "equip ".
+                if let KeyCode::Char(c) = key.code {
+                    // Append to rolling buffer of recent chars (limit length)
+                    if c.is_ascii_graphic() || c.is_whitespace() {
+                        self.command_buffer.push(c);
+                        if self.command_buffer.len() > 64 { self.command_buffer.drain(0..(self.command_buffer.len()-64)); }
+                    }
+
+                    if !self.inventory_cmd_active && self.command_buffer.ends_with("equip ") {
+                        self.inventory_cmd_active = true;
+                        self.inventory_query.clear();
+                        self.inventory_matches.clear();
+                        self.inventory_selected_match = 0;
+                        self.floating_texts.add_text("Inventory: type item name and press Enter (Tab cycles)".to_string(), 40.0, 6.0, Color::Magenta);
+                    }
+
+                    // If inventory command active, append to inventory_query and update matches
+                    else if self.inventory_cmd_active {
+                        if c == '\t' {
+                            // handled by KeyCode::Tab branch below
+                        } else if c.is_control() {
+                            // ignore
+                        } else {
+                            self.inventory_query.push(c);
+                            // Recompute matches (case-insensitive contains)
+                            self.inventory_matches = self.inventory.iter().enumerate()
+                                .filter(|(_, it)| it.name.to_lowercase().contains(&self.inventory_query.to_lowercase()))
+                                .map(|(i, _)| i)
+                                .collect();
+                            self.inventory_selected_match = 0;
+
+                            // Auto-equip on exact match
+                            if let Some((idx, _)) = self.inventory.iter().enumerate().find(|(_, it)| it.name.eq_ignore_ascii_case(&self.inventory_query)) {
+                                self.equip_inventory_index(idx);
+                                self.inventory_cmd_active = false;
+                                self.command_buffer.clear();
+                            }
+                        }
+                    }
+                }
             }
             _ => {} // Ignore other key events
         }
@@ -1020,6 +1231,22 @@ impl Game {
     }
 
     fn render_game_area(&self, f: &mut Frame, game_area: Rect) {
+        // Defensive: refuse to render the full game area if it's too small to avoid
+        // creating zero-sized/invalid Rects or indexing into empty buffers.
+        if game_area.width < 20 || game_area.height < 8 {
+            // Render a minimal placeholder so the UI doesn't panic when the layout
+            // gives a very small game area (happens while resizing across breakpoints).
+            if game_area.width >= 3 && game_area.height >= 1 {
+                let placeholder = Paragraph::new(Line::from(Span::styled(
+                    "Window too small for game view",
+                    Style::default().fg(Color::Yellow),
+                ))).block(Block::default().borders(Borders::ALL).title("KeyCrafter"));
+                f.render_widget(Clear, game_area);
+                f.render_widget(placeholder, game_area);
+            }
+            return;
+        }
+
         let mut lines = Vec::new();
         
         // Create empty grid
@@ -1160,40 +1387,51 @@ impl Game {
         // Then render floating texts on top
         for floating_text in self.floating_texts.get_texts() {
             let (x, y) = floating_text.get_position();
+
+            // Defensive bounds checks: ensure game_area is large enough before subtracting
+            if game_area.height < 2 || game_area.width < 3 {
+                continue;
+            }
+
             // Only render floating text within the game area bounds (excluding borders)
-            if y > 0 && y < (game_area.height - 1) as usize && 
-               x > 0 && x < (game_area.width - 1) as usize {
-                
+            if y > 0 && y < (game_area.height.saturating_sub(1)) as usize &&
+               x > 0 && x < (game_area.width.saturating_sub(1)) as usize {
+
                 // Adjust for the border offset
                 let adjusted_y = y - 1;
                 let adjusted_x = x - 1;
-                
+
                 if adjusted_y < lines.len() && adjusted_x < game_area.width as usize {
                     // Get what's currently at this position
                     let current_line = &lines[adjusted_y];
                     let mut new_line = current_line.spans.clone();
-                    
+
                     // Calculate where in the line to insert the text
                     let text = floating_text.get_text();
-                    let start_x = adjusted_x.min((game_area.width - 2) as usize - text.len());
-                    
+                    let max_content_w = (game_area.width.saturating_sub(2)) as usize;
+                    if max_content_w == 0 || text.is_empty() {
+                        continue;
+                    }
+
+                    let start_x = adjusted_x.min(max_content_w.saturating_sub(text.len()));
+
                     // Replace spans at the text position, but only within bounds
                     for (i, c) in text.chars().enumerate() {
                         let pos_x = start_x + i;
-                        if pos_x < new_line.len() && pos_x < (game_area.width - 2) as usize {
+                        if pos_x < new_line.len() && pos_x < max_content_w {
                             let color = floating_text.get_color();
                             new_line[pos_x] = Span::styled(
                                 c.to_string(),
-                                Style::default().fg(color).add_modifier(Modifier::BOLD)
+                                Style::default().fg(color).add_modifier(Modifier::BOLD),
                             );
                         }
                     }
-                    
-                    // Render just this line within the game area
+
+                    // Render just this line within the game area (guard width)
                     let text_pos = Rect::new(
                         game_area.x + 1, // Account for border
                         game_area.y + 1 + adjusted_y as u16, // Account for border and line position
-                        game_area.width - 2, // Account for borders
+                        game_area.width.saturating_sub(2), // Account for borders
                         1,
                     );
                     let text_widget = Paragraph::new(Line::from(new_line));
@@ -1232,10 +1470,18 @@ impl Game {
                 right_lines.push(Line::from(Span::raw("")));
             }
 
-            // Completed items
+            // Inventory summary (compact) replaced with single-line preview per UX request
+            // Count any completed one-time items (Boat/Workbench) that may be missing from `self.inventory`
+            let mut effective_inventory_count = self.inventory.len();
             for item in self.crafting.get_completed_items() {
-                right_lines.push(Line::from(vec![Span::styled(item, Style::default().fg(Color::Green))]));
+                if (item == "Workbench" || item == "Boat") && self.inventory.iter().all(|it| it.name != *item) {
+                    effective_inventory_count += 1;
+                }
             }
+            right_lines.push(Line::from(vec![Span::styled(
+                format!("Inventory: {} items | Press 4 to open", effective_inventory_count),
+                Style::default().fg(Color::Yellow),
+            )]));
 
             let right_widget = Paragraph::new(right_lines)
                 .block(Block::default())
@@ -1243,7 +1489,6 @@ impl Game {
 
             f.render_widget(Clear, right_rect);
             f.render_widget(right_widget, right_rect);
-
 
         }
 
@@ -1310,8 +1555,8 @@ impl Game {
             let debug_text = format!("Loaded: Wood={}, Copper={}, Iron={}", self.player.wood, self.player.copper, self.player.iron);
             let debug_pos = Rect::new(
                 game_area.x + 1,
-                game_area.y + game_area.height - 2,
-                game_area.width - 2,
+                game_area.y + game_area.height.saturating_sub(2),
+                game_area.width.saturating_sub(2),
                 1,
             );
             let debug_widget = Paragraph::new(Line::from(vec![
@@ -1319,12 +1564,53 @@ impl Game {
             ]));
             f.render_widget(debug_widget, debug_pos);
         }
+
+        // Inventory overlay: small outlined box anchored to the right; toggled with '4'
+        if self.show_inventory {
+            let inv_w: u16 = 36;
+            // Build a display inventory that includes any completed one-time items (Boat/Workbench)
+            // even if they're missing from the in-memory `inventory` (keeps UI consistent).
+            let mut display_inventory = self.inventory.clone();
+            for item in self.crafting.get_completed_items() {
+                if (item == "Workbench" || item == "Boat") && display_inventory.iter().all(|it| it.name != *item) {
+                    display_inventory.push(save_system::InventoryItem::new(item, 1, false));
+                }
+            }
+
+            // Make the overlay tall enough to show every inventory line (help + each item).
+            let content_lines: u16 = 1 + display_inventory.len() as u16; // help + items
+            let inv_h: u16 = content_lines + 2; // content + borders
+            let inv_x = game_area.x + game_area.width.saturating_sub(inv_w + 2);
+            let inv_y = game_area.y + 2;
+
+            let mut inv_lines: Vec<Line> = Vec::new();
+            // Single help/hint line followed by the full list of inventory items
+            inv_lines.push(Line::from(Span::raw("(use: type 'equip <name>' then Tab/Enter)")));
+
+            for it in &display_inventory {
+                let eq = if it.equipped { " (e)" } else { "" };
+                inv_lines.push(Line::from(vec![Span::raw(format!("+{} {}{}", it.count, it.name, eq))]));
+            }
+
+            let inv_widget = Paragraph::new(inv_lines)
+                .block(Block::default().borders(Borders::ALL).title(format!("Inventory [{}]", display_inventory.len())))
+                .wrap(Wrap { trim: true });
+            f.render_widget(Clear, Rect::new(inv_x, inv_y, inv_w, inv_h));
+            f.render_widget(inv_widget, Rect::new(inv_x, inv_y, inv_w, inv_h));
+        }
     }
 
     // Animated island-map pop-up rendered from the bottom of the game area
     fn render_island_map(&self, f: &mut Frame, game_area: Rect) {
         // Only draw when at least partly visible
         if self.island_map_progress <= 0.01 {
+            return;
+        }
+
+        // Avoid rendering the island map when play area is too narrow/short — this
+        // calculation can otherwise produce Rects that don't make sense for small
+        // terminals when resizing quickly.
+        if game_area.width < 48 || game_area.height < 6 {
             return;
         }
 
@@ -1474,6 +1760,13 @@ impl Game {
     }
 
     fn render_crafting_area(&self, f: &mut Frame, area: Rect) {
+        // If the crafting area is too narrow/short, skip rendering to avoid
+        // creating zero-height split regions or invalid Rects when terminal is
+        // resized across thresholds.
+        if area.width < 30 || area.height < 3 {
+            return;
+        }
+
         let recipes = self.crafting.get_recipes();
 
         // Title line at the top of the crafting area
@@ -1636,7 +1929,6 @@ impl Game {
             player_iron: self.player.iron,
             player_level: self.player.level,
             player_xp: self.player.xp,
-            completed_items: self.crafting.get_completed_items().to_vec(),
             has_workbench: self.crafting.has_workbench,
             has_boat: self.crafting.get_completed_items().iter().any(|it| it == "Boat"),
             has_iron_sword_unlocked: self.crafting.is_unlocked_by_name("Iron Sword"),
@@ -1657,6 +1949,7 @@ impl Game {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
                 .as_secs(),
+            inventory: self.inventory.clone(),
         };
 
         // Debug output to help track saves
@@ -1769,7 +2062,26 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn ui(f: &mut Frame, game: &mut Game) {
     let size = f.size();
-    
+
+    // Defensive minimum terminal size to avoid panics when layout areas would underflow.
+    const MIN_WIDTH: u16 = 60;
+    const MIN_HEIGHT: u16 = 20;
+    if size.width < MIN_WIDTH || size.height < MIN_HEIGHT {
+        let warning = Paragraph::new(vec![
+            Line::from(Span::styled("Terminal too small", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))),
+            Line::from(Span::raw(format!("Minimum: {}x{}  —  Current: {}x{}", MIN_WIDTH, MIN_HEIGHT, size.width, size.height))),
+            Line::from(Span::raw("Please resize the terminal to continue.")),
+        ])
+        .block(Block::default().borders(Borders::ALL).title("Resize required"))
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true });
+
+        let area = Rect::new(0, 0, size.width, size.height);
+        f.render_widget(Clear, area);
+        f.render_widget(warning, area);
+        return;
+    }
+
     // Split screen into game area and crafting area (reduced game area to give more room to crafting)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -1778,7 +2090,7 @@ fn ui(f: &mut Frame, game: &mut Game) {
             Constraint::Length(16), // Crafting area increased for more UI space
         ])
         .split(size);
-    
+
     game.render_game_area(f, chunks[0]);
     game.render_crafting_area(f, chunks[1]);
 }

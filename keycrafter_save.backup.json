@@ -5,10 +5,6 @@
   "player_iron": 5,
   "player_level": 5,
   "player_xp": 126,
-  "completed_items": [
-    "Workbench",
-    "Boat"
-  ],
   "has_workbench": true,
   "has_boat": true,
   "has_iron_sword_unlocked": true,

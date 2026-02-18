@@ -5,10 +5,6 @@
   "player_iron": 12,
   "player_level": 5,
   "player_xp": 401,
-  "completed_items": [
-    "Workbench",
-    "Boat"
-  ],
   "has_workbench": true,
   "has_boat": true,
   "has_iron_sword_unlocked": true,
@@ -23,17 +19,39 @@
     "characters_typed": 1351,
     "resources_harvested": {
       "Copper": 66,
-      "Wood": 125,
-      "Iron": 17
+      "Iron": 17,
+      "Wood": 125
     },
-    "total_play_time_seconds": 54037,
-    "session_start_time": 1771366112,
+    "total_play_time_seconds": 129367,
+    "session_start_time": 1771441442,
     "words_completed": 298,
     "crafting_attempts": 0,
     "successful_crafts": 5,
-    "mistakes_made": 348,
+    "mistakes_made": 349,
     "fastest_word_time": 0.1836914,
     "average_wpm": 0.33116633
   },
-  "save_timestamp": 1771366112
+  "save_timestamp": 1771441442,
+  "inventory": [
+    {
+      "name": "Axe",
+      "count": 1,
+      "equipped": true
+    },
+    {
+      "name": "Pickaxe",
+      "count": 1,
+      "equipped": true
+    },
+    {
+      "name": "Workbench",
+      "count": 1,
+      "equipped": false
+    },
+    {
+      "name": "Boat",
+      "count": 1,
+      "equipped": false
+    }
+  ]
 }

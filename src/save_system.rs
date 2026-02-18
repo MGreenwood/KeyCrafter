@@ -20,6 +20,21 @@ pub struct GameStats {
     pub average_wpm: f32,
 }
 
+/// Simple inventory item stored in saves. "count" lets items be stacked; "equipped"
+/// marks the entry as currently equipped (shown as "(e)" in UI).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct InventoryItem {
+    pub name: String,
+    pub count: u32,
+    pub equipped: bool,
+}
+
+impl InventoryItem {
+    pub fn new(name: impl Into<String>, count: u32, equipped: bool) -> Self {
+        Self { name: name.into(), count, equipped }
+    }
+}
+
 impl Default for GameStats {
     fn default() -> Self {
         Self {
@@ -50,7 +65,6 @@ pub struct SaveData {
     pub player_iron: u32,
     pub player_level: u32,
     pub player_xp: u32,
-    pub completed_items: Vec<String>,
     pub has_workbench: bool,
     #[serde(default)]
     pub has_boat: bool,
@@ -64,6 +78,10 @@ pub struct SaveData {
     pub pickaxe_upgrade_count: u32,
     pub stats: GameStats,
     pub save_timestamp: u64,
+
+    // Inventory persisted as list of item entries (allows duplicates / stacks & equipped flag)
+    #[serde(default)]
+    pub inventory: Vec<InventoryItem>,
 }
 
 impl Default for SaveData {
@@ -75,7 +93,6 @@ impl Default for SaveData {
             player_iron: 0,
             player_level: 1,
             player_xp: 0,
-            completed_items: Vec::new(),
             has_workbench: false,
             has_boat: false,
             has_iron_sword_unlocked: false,
@@ -88,6 +105,7 @@ impl Default for SaveData {
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
                 .as_secs(),
+            inventory: Vec::new(),
         }
     }
 }
@@ -152,8 +170,10 @@ impl SaveManager {
         let mut loaded = false;
 
         // Try to load the main save file
+        let mut raw_main_json: Option<String> = None;
         if Path::new(&self.save_file_path).exists() {
             if let Ok(json) = fs::read_to_string(&self.save_file_path) {
+                raw_main_json = Some(json.clone());
                 if let Ok(data) = serde_json::from_str(&json) {
                     save_data = data;
                     loaded = true;
@@ -173,7 +193,20 @@ impl SaveManager {
                        backup_data.player_iron > save_data.player_iron {
                         // println!("Loaded backup save with more resources");
                         save_data = backup_data;
+                        raw_main_json = Some(json);
                     }
+                }
+            }
+        }
+
+        // Cleanup old save JSON containing deprecated `completed_items` key by rewriting
+        // the file with the normalized `SaveData` (this removes the obsolete field).
+        if let Some(raw) = raw_main_json {
+            if raw.contains("\"completed_items\"") {
+                // preserve original as a backup copy, then overwrite with cleaned JSON
+                let _ = fs::write(&self.backup_file_path, &raw);
+                if let Ok(cleaned) = serde_json::to_string_pretty(&save_data) {
+                    let _ = fs::write(&self.save_file_path, &cleaned);
                 }
             }
         }
@@ -214,6 +247,19 @@ mod tests {
         let s = serde_json::to_string(&d).unwrap();
         let parsed: SaveData = serde_json::from_str(&s).unwrap();
         assert_eq!(parsed.current_island_index, 2);
+    }
+
+    #[test]
+    fn save_data_inventory_roundtrip() {
+        let mut d = SaveData::default();
+        d.inventory.push(InventoryItem::new("Axe", 2, true));
+        d.inventory.push(InventoryItem::new("Iron Sword", 1, false));
+        let s = serde_json::to_string(&d).unwrap();
+        let parsed: SaveData = serde_json::from_str(&s).unwrap();
+        assert_eq!(parsed.inventory.len(), 2);
+        assert_eq!(parsed.inventory[0].name, "Axe");
+        assert_eq!(parsed.inventory[0].count, 2);
+        assert!(parsed.inventory[0].equipped);
     }
 }
 
